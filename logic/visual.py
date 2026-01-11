@@ -51,6 +51,7 @@ class Visuals(threading.Thread):
             self.start()
     
     def run(self):
+        from logic.hotkeys_watcher import hotkeys_watcher
         if cfg.show_window:
             self.spawn_debug_window()
             prev_frame_time, new_frame_time = 0, 0 if cfg.show_window_fps else None
@@ -157,6 +158,16 @@ class Visuals(threading.Thread):
                 prev_frame_time = new_frame_time
                 if cfg.show_window:
                     cv2.putText(self.image, f'FPS: {str(int(fps))}', (10, 80) if cfg.show_detection_speed else (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 1, cv2.LINE_AA)
+
+            # Own Player Filter
+            if hotkeys_watcher.filter_own_player_enabled:
+                y_pos = 20
+                if cfg.show_detection_speed:
+                    y_pos += 60
+                if cfg.show_window_fps:
+                    y_pos += 20
+                if cfg.show_window:
+                    cv2.putText(self.image, 'Own Player Filter: ON', (10, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 1, cv2.LINE_AA)
 
             # bScope
             if self.draw_bScope_data:

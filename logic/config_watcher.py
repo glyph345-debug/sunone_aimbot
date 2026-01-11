@@ -52,6 +52,7 @@ class Config():
         self.disable_prediction = self.config_Aim.getboolean("disable_prediction")
         self.prediction_interval = float(self.config_Aim["prediction_interval"])
         self.third_person = self.config_Aim.getboolean("third_person")
+        self.own_player_filter_zone = float(self.config_Aim["own_player_filter_zone"])
         
         # Hotkeys
         self.config_Hotkeys_settings = self.config["Hotkeys"]
@@ -60,6 +61,7 @@ class Config():
         self.hotkey_exit = str(self.config_Hotkeys_settings["hotkey_exit"])
         self.hotkey_pause = str(self.config_Hotkeys_settings["hotkey_pause"])
         self.hotkey_reload_config = str(self.config_Hotkeys_settings["hotkey_reload_config"])
+        self.hotkey_toggle_own_player_filter = str(self.config_Hotkeys_settings["hotkey_toggle_own_player_filter"])
         
         # Mouse
         self.config_Mouse = self.config["Mouse"]

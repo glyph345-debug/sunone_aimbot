@@ -78,6 +78,13 @@ class FrameParser:
         if not classes_tensor.numel():
             return None
 
+        if cfg.third_person and hotkeys_watcher.filter_own_player_enabled:
+            filter_y_cutoff = capture.screen_y_center + (capture.screen_y_center * cfg.own_player_filter_zone)
+            mask = boxes_array[:, 1] <= filter_y_cutoff
+            
+            if mask.any():
+                return self._find_nearest_target(boxes_array[mask], classes_tensor[mask])
+
         return self._find_nearest_target(boxes_array, classes_tensor)
 
     def _convert_sv_to_tensor(self, frame):

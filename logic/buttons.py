@@ -122,7 +122,8 @@ class Buttons:
         'StartMailKey': 180,
         'SelectMedia': 181,
         'StartApplication1': 182,
-        'StartApplication2': 183
+        'StartApplication2': 183,
+        'Comma': 188
     }
 
     @classmethod
