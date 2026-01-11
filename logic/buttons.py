@@ -123,7 +123,8 @@ class Buttons:
         'SelectMedia': 181,
         'StartApplication1': 182,
         'StartApplication2': 183,
-        'Comma': 188
+        'Comma': 188,
+        'Period': 190
     }
 
     @classmethod
