@@ -371,4 +371,6 @@ class ConfigEditor(threading.Thread):
             self.window.hide()
 
 
-config_gui = ConfigEditor()
+def launch_config_gui():
+    """Launch the config GUI in a new thread (callable from hotkeys_watcher)."""
+    return ConfigEditor()

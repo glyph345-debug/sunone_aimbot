@@ -7,7 +7,7 @@ from logic.visual import visuals
 from logic.frame_parser import frameParser
 from logic.hotkeys_watcher import hotkeys_watcher
 from logic.checks import run_checks
-from logic.config_gui import config_gui
+# from logic.config_gui import config_gui  # Lazy-loaded when F5 is pressed
 import supervision as sv
     
 tracker = sv.ByteTrack() if not cfg.disable_tracker else None

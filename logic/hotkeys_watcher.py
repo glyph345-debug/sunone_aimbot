@@ -10,6 +10,11 @@ from logic.capture import capture
 from logic.mouse import mouse
 from logic.visual import visuals
 from logic.shooting import shooting
+from logic.logger import logger
+
+config_gui_thread = None
+config_gui_enabled = False
+_config_gui_instance = None
 
 class HotkeysWatcher(threading.Thread):
     def __init__(self):
@@ -79,11 +84,21 @@ class HotkeysWatcher(threading.Thread):
         if app_toggle_config_editor != toggle_config_editor_prev_state:
             if app_toggle_config_editor in (1, 0):
                 try:
-                    from logic.config_gui import config_gui
-                    if hasattr(config_gui, 'toggle_visibility'):
-                        config_gui.toggle_visibility()
-                except (ImportError, AttributeError):
-                    pass
+                    global config_gui_thread, config_gui_enabled, _config_gui_instance
+                    
+                    if not config_gui_enabled:
+                        # First F5 press - launch the GUI in a new thread
+                        from logic.config_gui import launch_config_gui
+                        _config_gui_instance = launch_config_gui()
+                        config_gui_thread = _config_gui_instance
+                        config_gui_enabled = True
+                        logger.info('[Hotkeys] Launched Config GUI')
+                    else:
+                        # Subsequent F5 presses - toggle visibility
+                        if _config_gui_instance is not None and hasattr(_config_gui_instance, 'toggle_visibility'):
+                            _config_gui_instance.toggle_visibility()
+                except (ImportError, AttributeError) as e:
+                    logger.error(f'[Hotkeys] Error toggling config GUI: {e}')
         
         cfg_reload_prev_state = app_reload_cfg
         filter_own_player_prev_state = app_filter_own_player
