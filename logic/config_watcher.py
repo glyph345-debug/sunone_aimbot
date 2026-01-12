@@ -52,7 +52,13 @@ class Config():
         self.disable_prediction = self.config_Aim.getboolean("disable_prediction")
         self.prediction_interval = float(self.config_Aim["prediction_interval"])
         self.third_person = self.config_Aim.getboolean("third_person")
-        self.own_player_filter_zone = float(self.config_Aim["own_player_filter_zone"])
+
+        own_player_filter_zone_size_raw = self.config_Aim.get("own_player_filter_zone_size", fallback=None)
+        if own_player_filter_zone_size_raw is None:
+            own_player_filter_zone_size_raw = self.config_Aim.get("own_player_filter_zone", fallback="0.5")
+
+        self.own_player_filter_zone_size = float(own_player_filter_zone_size_raw)
+        self.own_player_filter_zone_size = max(0.0, min(1.0, self.own_player_filter_zone_size))
         
         # Hotkeys
         self.config_Hotkeys_settings = self.config["Hotkeys"]

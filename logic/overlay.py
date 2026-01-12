@@ -85,6 +85,18 @@ class Overlay:
     def _draw_square(self, x1, y1, x2, y2, color='white', size=1):
         self.canvas.create_rectangle(x1, y1, x2, y2, outline=color, width=size)
 
+    def draw_filled_rectangle(self, x1, y1, x2, y2, fill='red', outline='', size=1, stipple='gray25'):
+        self.queue.put((self._draw_filled_rectangle, (x1, y1, x2, y2, fill, outline, size, stipple)))
+
+    def _draw_filled_rectangle(self, x1, y1, x2, y2, fill='red', outline='', size=1, stipple='gray25'):
+        self.canvas.create_rectangle(x1, y1, x2, y2, fill=fill, outline=outline, width=size, stipple=stipple)
+
+    def draw_polygon(self, points, fill='red', outline='', size=1, stipple='gray25'):
+        self.queue.put((self._draw_polygon, (points, fill, outline, size, stipple)))
+
+    def _draw_polygon(self, points, fill='red', outline='', size=1, stipple='gray25'):
+        self.canvas.create_polygon(points, fill=fill, outline=outline, width=size, stipple=stipple)
+
     def draw_oval(self, x1, y1, x2, y2, color='white', size=1):
         self.queue.put((self._draw_oval, (x1, y1, x2, y2, color, size)))
 

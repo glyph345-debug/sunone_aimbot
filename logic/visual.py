@@ -1,7 +1,9 @@
 import queue
 import threading
 import time
+import math
 import cv2
+import numpy as np
 import win32gui, win32con
 import win32api
 import os
@@ -48,6 +50,8 @@ class Visuals(threading.Thread):
             }
             
             self.disabled_line_classes = [2, 3, 4, 8, 9, 10]
+
+            self._own_player_filter_visual_cache = {}
             self.start()
     
     def run(self):
@@ -71,6 +75,12 @@ class Visuals(threading.Thread):
                     self.screenshot_taken = True
             else:
                 self.screenshot_taken = False
+
+            if cfg.third_person and hotkeys_watcher.filter_own_player_enabled:
+                self._draw_own_player_filter_zone(
+                    hotkeys_watcher.filter_own_player_side,
+                    cfg.own_player_filter_zone_size,
+                )
             
             # simple line
             if self.draw_line_data:
@@ -236,6 +246,116 @@ class Visuals(threading.Thread):
                 win32gui.SetWindowPos(debug_window_hwnd, win32con.HWND_TOPMOST, x, y, cfg.detection_window_width, cfg.detection_window_height, 0)
             except Exception as e:
                 logger.error(f'[Visuals] Error with on top window, skipping this option `debug_window_always_on_top`: {e}')
+
+    def _get_own_player_filter_visual_data(self, blocked_side: str, zone_size: float):
+        blocked_side = (blocked_side or "left").lower().strip()
+        if blocked_side not in ("left", "right"):
+            blocked_side = "left"
+
+        zone_size = max(0.0, min(1.0, float(zone_size)))
+
+        height, width = self.image.shape[:2]
+        cache_key = (width, height, cfg.circle_capture, blocked_side, round(zone_size, 3))
+        cached = self._own_player_filter_visual_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        boundary_x = int(width * zone_size) if blocked_side == "left" else int(width * (1.0 - zone_size))
+
+        if cfg.circle_capture:
+            a = width / 2.0
+            b = height / 2.0
+            cx = a
+            cy = b
+
+            dx = boundary_x - cx
+            if abs(dx) >= a:
+                y_top, y_bottom = 0, height
+            else:
+                term = 1.0 - (dx * dx) / (a * a)
+                y_extent = b * math.sqrt(max(0.0, term))
+                y_top = int(cy - y_extent)
+                y_bottom = int(cy + y_extent)
+        else:
+            y_top, y_bottom = 0, height
+
+        polygon_points = None
+        if cfg.show_overlay and cfg.circle_capture:
+            mask = capture.get_detection_mask(self.image.shape, blocked_side, zone_size, circle_capture=True)
+            if mask is not None:
+                res = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                contours = res[0] if len(res) == 2 else res[1]
+                if contours:
+                    contour = max(contours, key=cv2.contourArea)
+                    approx = cv2.approxPolyDP(contour, 1.0, True)
+                    pts = approx.reshape(-1, 2)
+                    polygon_points = [int(v) for x, y in pts for v in (x, y)]
+
+        data = {
+            "boundary_x": boundary_x,
+            "y_top": y_top,
+            "y_bottom": y_bottom,
+            "polygon_points": polygon_points,
+            "zone_size": zone_size,
+            "blocked_side": blocked_side,
+        }
+        self._own_player_filter_visual_cache[cache_key] = data
+        return data
+
+    def _draw_own_player_filter_zone(self, blocked_side: str, zone_size: float):
+        try:
+            zone_size = float(zone_size)
+        except (TypeError, ValueError):
+            zone_size = 0.0
+
+        zone_size = max(0.0, min(1.0, zone_size))
+        if zone_size <= 0.0:
+            return
+
+        data = self._get_own_player_filter_visual_data(blocked_side, zone_size)
+        boundary_x = data["boundary_x"]
+        y_top = data["y_top"]
+        y_bottom = data["y_bottom"]
+        blocked_side = data["blocked_side"]
+
+        if cfg.show_window:
+            mask = capture.get_detection_mask(self.image.shape, blocked_side, zone_size)
+            if mask is not None:
+                overlay_img = self.image.copy()
+                overlay_img[mask > 0] = (0, 120, 255)
+                self.image = cv2.addWeighted(overlay_img, 0.3, self.image, 0.7, 0)
+
+            cv2.line(self.image, (boundary_x, y_top), (boundary_x, y_bottom), (0, 200, 255), 2)
+            cv2.putText(
+                self.image,
+                f'ZONE BLOCKED: {blocked_side.upper()}',
+                (10, self.image.shape[0] - 10),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                (0, 120, 255),
+                1,
+                cv2.LINE_AA,
+            )
+
+        if cfg.show_overlay:
+            height, width = self.image.shape[:2]
+            if cfg.circle_capture:
+                polygon_points = data["polygon_points"]
+                if polygon_points:
+                    overlay.draw_polygon(polygon_points, fill='orange', outline='', size=1, stipple='gray25')
+                else:
+                    if blocked_side == "left":
+                        overlay.draw_filled_rectangle(0, 0, boundary_x, height, fill='orange', outline='', size=1, stipple='gray25')
+                    else:
+                        overlay.draw_filled_rectangle(boundary_x, 0, width, height, fill='orange', outline='', size=1, stipple='gray25')
+            else:
+                if blocked_side == "left":
+                    overlay.draw_filled_rectangle(0, 0, boundary_x, height, fill='orange', outline='', size=1, stipple='gray25')
+                else:
+                    overlay.draw_filled_rectangle(boundary_x, 0, width, height, fill='orange', outline='', size=1, stipple='gray25')
+
+            overlay.draw_line(boundary_x, y_top, boundary_x, y_bottom, 'orange', 2)
+            overlay.draw_text(width // 2, 16, f'ZONE BLOCKED: {blocked_side.upper()}', 14, 'orange')
                 
     def draw_target_line(self, target_x, target_y, target_cls):
         if target_cls not in self.disabled_line_classes:

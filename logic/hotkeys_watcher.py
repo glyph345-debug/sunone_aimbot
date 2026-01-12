@@ -46,7 +46,11 @@ class HotkeysWatcher(threading.Thread):
 
         if app_filter_own_player != filter_own_player_prev_state:
             if app_filter_own_player in (1, 0):
-                self.filter_own_player_enabled = not self.filter_own_player_enabled
+                if not self.filter_own_player_enabled:
+                    self.filter_own_player_enabled = True
+                    self.filter_own_player_side = "left"
+                else:
+                    self.filter_own_player_enabled = False
         
         if app_switch_filter_side != switch_filter_side_prev_state:
             if app_switch_filter_side in (1, 0):
