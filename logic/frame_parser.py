@@ -79,11 +79,20 @@ class FrameParser:
             return None
 
         if cfg.third_person and hotkeys_watcher.filter_own_player_enabled:
-            filter_y_cutoff = capture.screen_y_center + (capture.screen_y_center * cfg.own_player_filter_zone)
-            mask = boxes_array[:, 1] <= filter_y_cutoff
+            filter_x_distance = capture.screen_x_center * cfg.own_player_filter_zone
+            
+            if hotkeys_watcher.filter_own_player_side == "left":
+                # Filter out detections on the left side
+                mask = boxes_array[:, 0] >= capture.screen_x_center - filter_x_distance
+            else:
+                # Filter out detections on the right side
+                mask = boxes_array[:, 0] <= capture.screen_x_center + filter_x_distance
             
             if mask.any():
                 return self._find_nearest_target(boxes_array[mask], classes_tensor[mask])
+            else:
+                # Fallback: if all targets are in the filtered zone, return nearest target anyway
+                return self._find_nearest_target(boxes_array, classes_tensor)
 
         return self._find_nearest_target(boxes_array, classes_tensor)
 

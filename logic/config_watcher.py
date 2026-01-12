@@ -62,6 +62,7 @@ class Config():
         self.hotkey_pause = str(self.config_Hotkeys_settings["hotkey_pause"])
         self.hotkey_reload_config = str(self.config_Hotkeys_settings["hotkey_reload_config"])
         self.hotkey_toggle_own_player_filter = str(self.config_Hotkeys_settings["hotkey_toggle_own_player_filter"])
+        self.hotkey_switch_filter_side = str(self.config_Hotkeys_settings["hotkey_switch_filter_side"])
         
         # Mouse
         self.config_Mouse = self.config["Mouse"]
