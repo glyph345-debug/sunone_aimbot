@@ -1,12 +1,11 @@
 import threading
-import PySimpleGUI as sg
+import cv2
+import numpy as np
 import configparser
 import os
 
 from logic.config_watcher import cfg
 from logic.logger import logger
-
-sg.theme('DarkBlue3')
 
 
 class ConfigEditor(threading.Thread):
@@ -15,170 +14,541 @@ class ConfigEditor(threading.Thread):
         self.daemon = True
         self.name = 'ConfigEditor'
         
+        self.window_name = 'Config Editor'
         self.window = None
         self.running = True
         self.visible = True
+        self.minimized = False
         
-        self.start()
-    
-    def run(self):
-        self.create_window()
-        while self.running:
-            event, values = self.window.read(timeout=100)
-            
-            if event == sg.WIN_CLOSED or event == 'Exit':
-                self.save_position()
-                self.running = False
-                break
-            
-            if event == '-TOGGLE_VISIBILITY-':
-                self.visible = not self.visible
-                self.window.hide() if not self.visible else self.window.un_hide()
-                continue
-            
-            if event == '-RESET_DEFAULTS-':
-                self.reset_to_defaults()
-                continue
-            
-            if event == '-SAVE_CONFIG-':
-                self.save_config_file()
-                continue
-            
-            self.handle_value_change(event, values)
-            
-            if event and event.startswith('slider-') or event.startswith('checkbox-') or event.startswith('input-'):
-                self.save_config_file()
+        self.current_tab = 0
+        self.num_tabs = 8
         
-        if self.window:
-            self.window.close()
-    
-    def create_window(self):
-        layout = [
-            [sg.TabGroup([[
-                sg.Tab('Detection Window', self.create_detection_window_tab()),
-                sg.Tab('Capture Methods', self.create_capture_methods_tab()),
-                sg.Tab('Aim Settings', self.create_aim_settings_tab()),
-                sg.Tab('Hotkeys', self.create_hotkeys_tab()),
-                sg.Tab('Mouse Settings', self.create_mouse_settings_tab()),
-                sg.Tab('Shooting', self.create_shooting_tab()),
-                sg.Tab('AI Settings', self.create_ai_settings_tab()),
-                sg.Tab('Overlay & Debug', self.create_overlay_debug_tab()),
-            ]], tab_background_color='#2a2a2a', title_color='white', selected_title_color='#4a90d9')],
-            [sg.Button('Save Config', key='-SAVE_CONFIG-', button_color=('white', '#2e7d32')),
-             sg.Button('Reset Defaults', key='-RESET_DEFAULTS-', button_color=('white', '#c62828')),
-             sg.Button('Close', key='Exit', button_color=('white', '#616161'))]
+        self.tab_names = [
+            'Detection Window',
+            'Capture Methods',
+            'Aim Settings',
+            'Hotkeys',
+            'Mouse Settings',
+            'Shooting',
+            'AI Settings',
+            'Overlay & Debug'
         ]
         
+        self.mouse_pos = (0, 0)
+        self.dragging = False
+        self.drag_start = None
+        self.window_pos = (400, 100)
+        self.resizing = False
+        self.resize_start = None
+        self.resize_corner = None
+        
+        self.canvas_width = 800
+        self.canvas_height = 600
+        self.min_width = 600
+        self.min_height = 400
+        
+        self.font_scale = 0.6
+        self.font_thickness = 1
+        
+        self.colors = {
+            'bg': (50, 50, 50),
+            'text': (255, 255, 255),
+            'active': (0, 255, 255),
+            'inactive': (100, 100, 100),
+            'slider_track': (80, 80, 80),
+            'slider_handle': (0, 255, 255),
+            'checkbox': (0, 255, 255),
+            'input': (70, 70, 70),
+            'input_focus': (90, 90, 90),
+            'tab_active': (40, 40, 40),
+            'tab_inactive': (60, 60, 60),
+            'border': (100, 100, 100)
+        }
+        
+        self.ui_elements = []
+        self.focused_input = None
+        self.input_cursor_pos = 0
+        self.input_cursor_visible = True
+        self.input_cursor_timer = 0
+        
+        self.tab_elements = []
+        
+        self.init_ui_elements()
+        self.start()
+    
+    def init_ui_elements(self):
+        self.ui_elements = []
+        self.tab_elements = []
+        
+        y_offset = 60
+        row_height = 40
+        label_x = 20
+        slider_x = 180
+        slider_width = 200
+        
+        self.tab_elements = [[] for _ in range(self.num_tabs)]
+        
+        self.tab_elements[0] = [
+            {'type': 'slider', 'key': 'detection_window_width', 'x': slider_x, 'y': y_offset, 'w': slider_width, 'h': 20,
+             'min': 200, 'max': 640, 'value': cfg.detection_window_width, 'label': 'Window Width:', 'label_x': label_x},
+            {'type': 'slider', 'key': 'detection_window_height', 'x': slider_x, 'y': y_offset + row_height, 'w': slider_width, 'h': 20,
+             'min': 200, 'max': 640, 'value': cfg.detection_window_height, 'label': 'Window Height:', 'label_x': label_x},
+            {'type': 'checkbox', 'key': 'circle_capture', 'x': label_x, 'y': y_offset + row_height * 2, 'w': 20, 'h': 20,
+             'value': cfg.circle_capture, 'label': 'Circle Capture'}
+        ]
+        
+        y_offset = 60
+        self.tab_elements[1] = [
+            {'type': 'checkbox', 'key': 'Bettercam_capture', 'x': label_x, 'y': y_offset, 'w': 20, 'h': 20,
+             'value': cfg.Bettercam_capture, 'label': 'Bettercam Capture'},
+            {'type': 'checkbox', 'key': 'Obs_capture', 'x': label_x, 'y': y_offset + row_height, 'w': 20, 'h': 20,
+             'value': cfg.Obs_capture, 'label': 'OBS Capture'},
+            {'type': 'checkbox', 'key': 'mss_capture', 'x': label_x, 'y': y_offset + row_height * 2, 'w': 20, 'h': 20,
+             'value': cfg.mss_capture, 'label': 'MSS Capture'},
+            {'type': 'slider', 'key': 'capture_fps', 'x': slider_x, 'y': y_offset + row_height * 3, 'w': slider_width, 'h': 20,
+             'min': 30, 'max': 120, 'value': cfg.capture_fps, 'label': 'Capture FPS:', 'label_x': label_x, 'is_int': True}
+        ]
+        
+        y_offset = 60
+        self.tab_elements[2] = [
+            {'type': 'slider', 'key': 'body_y_offset', 'x': slider_x, 'y': y_offset, 'w': slider_width, 'h': 20,
+             'min': 0.0, 'max': 0.5, 'value': cfg.body_y_offset, 'label': 'Body Y Offset:', 'label_x': label_x},
+            {'type': 'checkbox', 'key': 'hideout_targets', 'x': label_x, 'y': y_offset + row_height, 'w': 20, 'h': 20,
+             'value': cfg.hideout_targets, 'label': 'Hideout Targets'},
+            {'type': 'checkbox', 'key': 'disable_headshot', 'x': label_x, 'y': y_offset + row_height * 2, 'w': 20, 'h': 20,
+             'value': cfg.disable_headshot, 'label': 'Disable Headshot'},
+            {'type': 'checkbox', 'key': 'disable_prediction', 'x': label_x, 'y': y_offset + row_height * 3, 'w': 20, 'h': 20,
+             'value': cfg.disable_prediction, 'label': 'Disable Prediction'},
+            {'type': 'slider', 'key': 'prediction_interval', 'x': slider_x, 'y': y_offset + row_height * 4, 'w': slider_width, 'h': 20,
+             'min': 0.5, 'max': 5.0, 'value': cfg.prediction_interval, 'label': 'Prediction Interval:', 'label_x': label_x},
+            {'type': 'checkbox', 'key': 'third_person', 'x': label_x, 'y': y_offset + row_height * 5, 'w': 20, 'h': 20,
+             'value': cfg.third_person, 'label': 'Third Person'},
+            {'type': 'slider', 'key': 'own_player_filter_zone_size', 'x': slider_x, 'y': y_offset + row_height * 6, 'w': slider_width, 'h': 20,
+             'min': 0.0, 'max': 1.0, 'value': cfg.own_player_filter_zone_size, 'label': 'Own Player Filter Zone:', 'label_x': label_x}
+        ]
+        
+        y_offset = 60
+        input_width = 150
+        self.tab_elements[3] = [
+            {'type': 'input', 'key': 'hotkey_targeting', 'x': slider_x, 'y': y_offset, 'w': input_width, 'h': 30,
+             'value': str(cfg.hotkey_targeting), 'label': 'Targeting Key:', 'label_x': label_x, 'max_len': 20},
+            {'type': 'input', 'key': 'hotkey_exit', 'x': slider_x, 'y': y_offset + row_height, 'w': input_width, 'h': 30,
+             'value': str(cfg.hotkey_exit), 'label': 'Exit Key:', 'label_x': label_x, 'max_len': 20},
+            {'type': 'input', 'key': 'hotkey_pause', 'x': slider_x, 'y': y_offset + row_height * 2, 'w': input_width, 'h': 30,
+             'value': str(cfg.hotkey_pause), 'label': 'Pause Key:', 'label_x': label_x, 'max_len': 20},
+            {'type': 'input', 'key': 'hotkey_reload_config', 'x': slider_x, 'y': y_offset + row_height * 3, 'w': input_width, 'h': 30,
+             'value': str(cfg.hotkey_reload_config), 'label': 'Reload Config Key:', 'label_x': label_x, 'max_len': 20},
+            {'type': 'input', 'key': 'hotkey_toggle_own_player_filter', 'x': slider_x, 'y': y_offset + row_height * 4, 'w': input_width, 'h': 30,
+             'value': str(cfg.hotkey_toggle_own_player_filter), 'label': 'Toggle Filter Key:', 'label_x': label_x, 'max_len': 20},
+            {'type': 'input', 'key': 'hotkey_switch_filter_side', 'x': slider_x, 'y': y_offset + row_height * 5, 'w': input_width, 'h': 30,
+             'value': str(cfg.hotkey_switch_filter_side), 'label': 'Switch Filter Side Key:', 'label_x': label_x, 'max_len': 20}
+        ]
+        
+        y_offset = 60
+        self.tab_elements[4] = [
+            {'type': 'input', 'key': 'mouse_dpi', 'x': slider_x, 'y': y_offset, 'w': input_width, 'h': 30,
+             'value': str(cfg.mouse_dpi), 'label': 'DPI:', 'label_x': label_x, 'max_len': 10, 'is_int': True},
+            {'type': 'slider', 'key': 'mouse_sensitivity', 'x': slider_x, 'y': y_offset + row_height, 'w': slider_width, 'h': 20,
+             'min': 0.5, 'max': 10.0, 'value': cfg.mouse_sensitivity, 'label': 'Sensitivity:', 'label_x': label_x},
+            {'type': 'slider', 'key': 'mouse_fov_width', 'x': slider_x, 'y': y_offset + row_height * 2, 'w': slider_width, 'h': 20,
+             'min': 20, 'max': 200, 'value': cfg.mouse_fov_width, 'label': 'FOV Width:', 'label_x': label_x, 'is_int': True},
+            {'type': 'slider', 'key': 'mouse_fov_height', 'x': slider_x, 'y': y_offset + row_height * 3, 'w': slider_width, 'h': 20,
+             'min': 20, 'max': 200, 'value': cfg.mouse_fov_height, 'label': 'FOV Height:', 'label_x': label_x, 'is_int': True},
+            {'type': 'slider', 'key': 'mouse_min_speed_multiplier', 'x': slider_x, 'y': y_offset + row_height * 4, 'w': slider_width, 'h': 20,
+             'min': 0.5, 'max': 3.0, 'value': cfg.mouse_min_speed_multiplier, 'label': 'Min Speed Multiplier:', 'label_x': label_x},
+            {'type': 'slider', 'key': 'mouse_max_speed_multiplier', 'x': slider_x, 'y': y_offset + row_height * 5, 'w': slider_width, 'h': 20,
+             'min': 0.5, 'max': 3.0, 'value': cfg.mouse_max_speed_multiplier, 'label': 'Max Speed Multiplier:', 'label_x': label_x},
+            {'type': 'checkbox', 'key': 'mouse_lock_target', 'x': label_x, 'y': y_offset + row_height * 6, 'w': 20, 'h': 20,
+             'value': cfg.mouse_lock_target, 'label': 'Lock Target'},
+            {'type': 'checkbox', 'key': 'mouse_auto_aim', 'x': label_x + 150, 'y': y_offset + row_height * 6, 'w': 20, 'h': 20,
+             'value': cfg.mouse_auto_aim, 'label': 'Auto Aim'},
+            {'type': 'checkbox', 'key': 'mouse_ghub', 'x': label_x, 'y': y_offset + row_height * 7, 'w': 20, 'h': 20,
+             'value': cfg.mouse_ghub, 'label': 'G-Hub Mouse'},
+            {'type': 'checkbox', 'key': 'mouse_rzr', 'x': label_x + 150, 'y': y_offset + row_height * 7, 'w': 20, 'h': 20,
+             'value': cfg.mouse_rzr, 'label': 'Razer Mouse'}
+        ]
+        
+        y_offset = 60
+        self.tab_elements[5] = [
+            {'type': 'checkbox', 'key': 'auto_shoot', 'x': label_x, 'y': y_offset, 'w': 20, 'h': 20,
+             'value': cfg.auto_shoot, 'label': 'Auto Shoot'},
+            {'type': 'checkbox', 'key': 'triggerbot', 'x': label_x, 'y': y_offset + row_height, 'w': 20, 'h': 20,
+             'value': cfg.triggerbot, 'label': 'Triggerbot'},
+            {'type': 'checkbox', 'key': 'force_click', 'x': label_x, 'y': y_offset + row_height * 2, 'w': 20, 'h': 20,
+             'value': cfg.force_click, 'label': 'Force Click'},
+            {'type': 'slider', 'key': 'bScope_multiplier', 'x': slider_x, 'y': y_offset + row_height * 3, 'w': slider_width, 'h': 20,
+             'min': 0.5, 'max': 3.0, 'value': cfg.bScope_multiplier, 'label': 'Scope Multiplier:', 'label_x': label_x}
+        ]
+        
+        y_offset = 60
+        self.tab_elements[6] = [
+            {'type': 'slider', 'key': 'AI_conf', 'x': slider_x, 'y': y_offset, 'w': slider_width, 'h': 20,
+             'min': 0.1, 'max': 0.9, 'value': cfg.AI_conf, 'label': 'AI Confidence:', 'label_x': label_x},
+            {'type': 'input', 'key': 'AI_device', 'x': slider_x, 'y': y_offset + row_height, 'w': input_width, 'h': 30,
+             'value': str(cfg.AI_device), 'label': 'AI Device:', 'label_x': label_x, 'max_len': 10},
+            {'type': 'checkbox', 'key': 'AI_enable_AMD', 'x': label_x, 'y': y_offset + row_height * 2, 'w': 20, 'h': 20,
+             'value': cfg.AI_enable_AMD, 'label': 'Enable AMD'},
+            {'type': 'checkbox', 'key': 'disable_tracker', 'x': label_x, 'y': y_offset + row_height * 3, 'w': 20, 'h': 20,
+             'value': cfg.disable_tracker, 'label': 'Disable Tracker'}
+        ]
+        
+        y_offset = 60
+        self.tab_elements[7] = [
+            {'type': 'checkbox', 'key': 'show_overlay', 'x': label_x, 'y': y_offset, 'w': 20, 'h': 20,
+             'value': cfg.show_overlay, 'label': 'Show Overlay'},
+            {'type': 'checkbox', 'key': 'overlay_show_boxes', 'x': label_x, 'y': y_offset + row_height, 'w': 20, 'h': 20,
+             'value': cfg.overlay_show_boxes, 'label': 'Overlay Show Boxes'},
+            {'type': 'checkbox', 'key': 'overlay_show_borders', 'x': label_x, 'y': y_offset + row_height * 2, 'w': 20, 'h': 20,
+             'value': cfg.overlay_show_borders, 'label': 'Overlay Show Borders'},
+            {'type': 'checkbox', 'key': 'show_window', 'x': label_x, 'y': y_offset + row_height * 3, 'w': 20, 'h': 20,
+             'value': cfg.show_window, 'label': 'Show Window'},
+            {'type': 'checkbox', 'key': 'show_boxes', 'x': label_x, 'y': y_offset + row_height * 4, 'w': 20, 'h': 20,
+             'value': cfg.show_boxes, 'label': 'Show Boxes'},
+            {'type': 'checkbox', 'key': 'show_labels', 'x': label_x, 'y': y_offset + row_height * 5, 'w': 20, 'h': 20,
+             'value': cfg.show_labels, 'label': 'Show Labels'},
+            {'type': 'checkbox', 'key': 'show_conf', 'x': label_x, 'y': y_offset + row_height * 6, 'w': 20, 'h': 20,
+             'value': cfg.show_conf, 'label': 'Show Conf'},
+            {'type': 'slider', 'key': 'debug_window_scale_percent', 'x': slider_x, 'y': y_offset + row_height * 7, 'w': slider_width, 'h': 20,
+             'min': 50, 'max': 200, 'value': cfg.debug_window_scale_percent, 'label': 'Debug Window Scale %:', 'label_x': label_x, 'is_int': True}
+        ]
+        
+        self.ui_elements = self.tab_elements[self.current_tab]
+    
+    def run(self):
+        try:
+            self.create_window()
+            self.main_loop()
+        except Exception as e:
+            logger.error(f'[Config GUI] Error in main loop: {e}')
+        finally:
+            self.cleanup()
+    
+    def create_window(self):
         pos_x = getattr(cfg, 'config_gui_pos_x', 400)
         pos_y = getattr(cfg, 'config_gui_pos_y', 100)
         
-        self.window = sg.Window(
-            'Aimbot Config Editor',
-            layout,
-            resizable=True,
-            size=(600, 500),
-            location=(pos_x, pos_y),
-            keep_on_top=True
-        )
+        cv2.namedWindow(self.window_name, cv2.WINDOW_NORMAL)
+        cv2.resizeWindow(self.window_name, self.canvas_width, self.canvas_height)
+        cv2.moveWindow(self.window_name, pos_x, pos_y)
+        
+        cv2.setMouseCallback(self.window_name, self.mouse_callback)
     
-    def create_detection_window_tab(self):
-        return [
-            [sg.Text('Window Width:', size=(20, 1)), sg.Slider(range=(200, 640), default_value=cfg.detection_window_width, orientation='h', size=(20, 15), key='detection_window_width')],
-            [sg.Text('Window Height:', size=(20, 1)), sg.Slider(range=(200, 640), default_value=cfg.detection_window_height, orientation='h', size=(20, 15), key='detection_window_height')],
-            [sg.Checkbox('Circle Capture', default=cfg.circle_capture, key='circle_capture')]
-        ]
+    def main_loop(self):
+        last_time = cv2.getTickCount()
+        
+        while self.running:
+            current_time = cv2.getTickCount()
+            elapsed = (current_time - last_time) / cv2.getTickFrequency()
+            last_time = current_time
+            
+            self.input_cursor_timer += elapsed
+            if self.input_cursor_timer >= 0.5:
+                self.input_cursor_visible = not self.input_cursor_visible
+                self.input_cursor_timer = 0
+            
+            if self.visible and not self.minimized:
+                self.draw()
+            
+            key = cv2.waitKey(30) & 0xFF
+            if key == 27:
+                self.toggle_visibility()
+            
+            if self.focused_input is not None:
+                self.handle_keyboard(key)
+        
+        cv2.destroyWindow(self.window_name)
     
-    def create_capture_methods_tab(self):
-        return [
-            [sg.Checkbox('Bettercam Capture', default=cfg.Bettercam_capture, key='Bettercam_capture')],
-            [sg.Checkbox('OBS Capture', default=cfg.Obs_capture, key='Obs_capture')],
-            [sg.Checkbox('MSS Capture', default=cfg.mss_capture, key='mss_capture')],
-            [sg.Text('Capture FPS:', size=(20, 1)), sg.Slider(range=(30, 120), default_value=cfg.capture_fps, orientation='h', size=(20, 15), key='capture_fps')]
-        ]
+    def draw(self):
+        canvas = np.full((self.canvas_height, self.canvas_width, 3), self.colors['bg'], dtype=np.uint8)
+        
+        self.draw_tabs(canvas)
+        self.draw_ui_elements(canvas)
+        self.draw_status_bar(canvas)
+        
+        cv2.imshow(self.window_name, canvas)
     
-    def create_aim_settings_tab(self):
-        return [
-            [sg.Text('Body Y Offset:', size=(20, 1)), sg.Slider(range=(0.0, 0.5), resolution=0.01, default_value=cfg.body_y_offset, orientation='h', size=(20, 15), key='body_y_offset')],
-            [sg.Checkbox('Hideout Targets', default=cfg.hideout_targets, key='hideout_targets')],
-            [sg.Checkbox('Disable Headshot', default=cfg.disable_headshot, key='disable_headshot')],
-            [sg.Checkbox('Disable Prediction', default=cfg.disable_prediction, key='disable_prediction')],
-            [sg.Text('Prediction Interval:', size=(20, 1)), sg.Slider(range=(0.5, 5.0), resolution=0.1, default_value=cfg.prediction_interval, orientation='h', size=(20, 15), key='prediction_interval')],
-            [sg.Checkbox('Third Person', default=cfg.third_person, key='third_person')],
-            [sg.Text('Own Player Filter Zone:', size=(20, 1)), sg.Slider(range=(0.0, 1.0), resolution=0.01, default_value=cfg.own_player_filter_zone, orientation='h', size=(20, 15), key='own_player_filter_zone')]
-        ]
+    def draw_tabs(self, canvas):
+        tab_width = self.canvas_width // self.num_tabs
+        tab_height = 40
+        
+        for i, tab_name in enumerate(self.tab_names):
+            x1 = i * tab_width
+            y1 = 0
+            x2 = (i + 1) * tab_width
+            y2 = tab_height
+            
+            if i == self.current_tab:
+                color = self.colors['tab_active']
+            else:
+                color = self.colors['tab_inactive']
+            
+            cv2.rectangle(canvas, (x1, y1), (x2, y2), color, -1)
+            cv2.rectangle(canvas, (x1, y1), (x2, y2), self.colors['border'], 1)
+            
+            text_x = x1 + 10
+            text_y = y1 + 25
+            
+            text_size = cv2.getTextSize(tab_name, cv2.FONT_HERSHEY_SIMPLEX, self.font_scale, self.font_thickness)[0]
+            center_x = x1 + (tab_width - text_size[0]) // 2
+            
+            cv2.putText(canvas, tab_name, (center_x, text_y), cv2.FONT_HERSHEY_SIMPLEX, self.font_scale, self.colors['text'], self.font_thickness)
+        
+        cv2.line(canvas, (0, tab_height), (self.canvas_width, tab_height), self.colors['border'], 2)
     
-    def create_hotkeys_tab(self):
-        return [
-            [sg.Text('Targeting Key:', size=(20, 1)), sg.InputText(cfg.hotkey_targeting, key='hotkey_targeting', size=(15, 1))],
-            [sg.Text('Exit Key:', size=(20, 1)), sg.InputText(cfg.hotkey_exit, key='hotkey_exit', size=(15, 1))],
-            [sg.Text('Pause Key:', size=(20, 1)), sg.InputText(cfg.hotkey_pause, key='hotkey_pause', size=(15, 1))],
-            [sg.Text('Reload Config Key:', size=(20, 1)), sg.InputText(cfg.hotkey_reload_config, key='hotkey_reload_config', size=(15, 1))],
-            [sg.Text('Toggle Filter Key:', size=(20, 1)), sg.InputText(cfg.hotkey_toggle_own_player_filter, key='hotkey_toggle_own_player_filter', size=(15, 1))],
-            [sg.Text('Switch Filter Side Key:', size=(20, 1)), sg.InputText(cfg.hotkey_switch_filter_side, key='hotkey_switch_filter_side', size=(15, 1))]
-        ]
+    def draw_ui_elements(self, canvas):
+        y_start = 60
+        row_height = 45
+        
+        for i, element in enumerate(self.ui_elements):
+            if element['type'] == 'slider':
+                self.draw_slider(canvas, element, y_start + i * row_height)
+            elif element['type'] == 'checkbox':
+                self.draw_checkbox(canvas, element, y_start + i * row_height)
+            elif element['type'] == 'input':
+                self.draw_input(canvas, element, y_start + i * row_height)
     
-    def create_mouse_settings_tab(self):
-        return [
-            [sg.Text('DPI:', size=(20, 1)), sg.InputText(str(cfg.mouse_dpi), key='mouse_dpi', size=(15, 1))],
-            [sg.Text('Sensitivity:', size=(20, 1)), sg.Slider(range=(0.5, 10.0), resolution=0.1, default_value=cfg.mouse_sensitivity, orientation='h', size=(20, 15), key='mouse_sensitivity')],
-            [sg.Text('FOV Width:', size=(20, 1)), sg.Slider(range=(20, 200), default_value=cfg.mouse_fov_width, orientation='h', size=(20, 15), key='mouse_fov_width')],
-            [sg.Text('FOV Height:', size=(20, 1)), sg.Slider(range=(20, 200), default_value=cfg.mouse_fov_height, orientation='h', size=(20, 15), key='mouse_fov_height')],
-            [sg.Text('Min Speed Multiplier:', size=(20, 1)), sg.Slider(range=(0.5, 3.0), resolution=0.1, default_value=cfg.mouse_min_speed_multiplier, orientation='h', size=(20, 15), key='mouse_min_speed_multiplier')],
-            [sg.Text('Max Speed Multiplier:', size=(20, 1)), sg.Slider(range=(0.5, 3.0), resolution=0.1, default_value=cfg.mouse_max_speed_multiplier, orientation='h', size=(20, 15), key='mouse_max_speed_multiplier')],
-            [sg.Checkbox('Lock Target', default=cfg.mouse_lock_target, key='mouse_lock_target')],
-            [sg.Checkbox('Auto Aim', default=cfg.mouse_auto_aim, key='mouse_auto_aim')],
-            [sg.Checkbox('G-Hub Mouse', default=cfg.mouse_ghub, key='mouse_ghub')],
-            [sg.Checkbox('Razer Mouse', default=cfg.mouse_rzr, key='mouse_rzr')]
-        ]
+    def draw_slider(self, canvas, element, y):
+        x = element['x']
+        w = element['w']
+        h = element['h']
+        min_val = element['min']
+        max_val = element['max']
+        value = element['value']
+        label = element['label']
+        label_x = element['label_x']
+        
+        cv2.putText(canvas, label, (label_x, y + 15), cv2.FONT_HERSHEY_SIMPLEX, self.font_scale, self.colors['text'], self.font_thickness)
+        
+        track_y = y + 20
+        
+        cv2.rectangle(canvas, (x, track_y), (x + w, track_y + 8), self.colors['slider_track'], -1)
+        cv2.rectangle(canvas, (x, track_y), (x + w, track_y + 8), self.colors['border'], 1)
+        
+        range_val = max_val - min_val
+        if range_val > 0:
+            ratio = (value - min_val) / range_val
+            handle_x = int(x + ratio * w)
+            cv2.circle(canvas, (handle_x, track_y + 4), 8, self.colors['slider_handle'], -1)
+            cv2.circle(canvas, (handle_x, track_y + 4), 8, self.colors['text'], 1)
+        
+        if element.get('is_int', False):
+            value_text = f'{int(value)}'
+        else:
+            value_text = f'{value:.2f}'
+        
+        value_size = cv2.getTextSize(value_text, cv2.FONT_HERSHEY_SIMPLEX, self.font_scale, self.font_thickness)[0]
+        cv2.putText(canvas, value_text, (x + w + 10, track_y + 8), cv2.FONT_HERSHEY_SIMPLEX, self.font_scale, self.colors['active'], self.font_thickness)
     
-    def create_shooting_tab(self):
-        return [
-            [sg.Checkbox('Auto Shoot', default=cfg.auto_shoot, key='auto_shoot')],
-            [sg.Checkbox('Triggerbot', default=cfg.triggerbot, key='triggerbot')],
-            [sg.Checkbox('Force Click', default=cfg.force_click, key='force_click')],
-            [sg.Text('Scope Multiplier:', size=(20, 1)), sg.Slider(range=(0.5, 3.0), resolution=0.1, default_value=cfg.bScope_multiplier, orientation='h', size=(20, 15), key='bScope_multiplier')]
-        ]
+    def draw_checkbox(self, canvas, element, y):
+        x = element['x']
+        w = element['w']
+        h = element['h']
+        checked = element['value']
+        label = element['label']
+        
+        if checked:
+            cv2.rectangle(canvas, (x, y), (x + w, y + h), self.colors['checkbox'], -1)
+            cv2.rectangle(canvas, (x, y), (x + w, y + h), self.colors['text'], 1)
+            
+            margin = 4
+            cv2.line(canvas, (x + margin, y + margin), (x + w - margin, y + h - margin), (255, 255, 255), 2)
+            cv2.line(canvas, (x + w - margin, y + margin), (x + margin, y + h - margin), (255, 255, 255), 2)
+        else:
+            cv2.rectangle(canvas, (x, y), (x + w, y + h), self.colors['inactive'], -1)
+            cv2.rectangle(canvas, (x, y), (x + w, y + h), self.colors['text'], 1)
+        
+        text_x = x + w + 10
+        text_y = y + 15
+        cv2.putText(canvas, label, (text_x, text_y), cv2.FONT_HERSHEY_SIMPLEX, self.font_scale, self.colors['text'], self.font_thickness)
     
-    def create_ai_settings_tab(self):
-        return [
-            [sg.Text('AI Confidence:', size=(20, 1)), sg.Slider(range=(0.1, 0.9), resolution=0.01, default_value=cfg.AI_conf, orientation='h', size=(20, 15), key='AI_conf')],
-            [sg.Text('AI Device:', size=(20, 1)), sg.InputText(cfg.AI_device, key='AI_device', size=(15, 1))],
-            [sg.Checkbox('Enable AMD', default=cfg.AI_enable_AMD, key='AI_enable_AMD')],
-            [sg.Checkbox('Disable Tracker', default=cfg.disable_tracker, key='disable_tracker')]
-        ]
+    def draw_input(self, canvas, element, y):
+        x = element['x']
+        w = element['w']
+        h = element['h']
+        value = element['value']
+        label = element['label']
+        label_x = element['label_x']
+        is_focused = self.focused_input == element['key']
+        
+        cv2.putText(canvas, label, (label_x, y + 18), cv2.FONT_HERSHEY_SIMPLEX, self.font_scale, self.colors['text'], self.font_thickness)
+        
+        input_bg_color = self.colors['input_focus'] if is_focused else self.colors['input']
+        cv2.rectangle(canvas, (x, y), (x + w, y + h), input_bg_color, -1)
+        cv2.rectangle(canvas, (x, y), (x + w, y + h), self.colors['active'] if is_focused else self.colors['border'], 1)
+        
+        display_text = value
+        if is_focused and self.input_cursor_visible and len(value) > 0:
+            display_text = value[:self.input_cursor_pos] + '|' + value[self.input_cursor_pos:]
+        
+        text_size = cv2.getTextSize(display_text, cv2.FONT_HERSHEY_SIMPLEX, self.font_scale, self.font_thickness)[0]
+        
+        if text_size[0] > w - 10:
+            ratio = (w - 10) / text_size[0]
+            char_width = text_size[0] / len(display_text) if display_text else 8
+            visible_chars = int((w - 10) / char_width)
+            start_pos = max(0, self.input_cursor_pos - visible_chars + 1)
+            display_text = value[start_pos:start_pos + visible_chars]
+            if is_focused and self.input_cursor_visible:
+                cursor_rel_pos = self.input_cursor_pos - start_pos
+                if cursor_rel_pos < len(display_text):
+                    display_text = display_text[:cursor_rel_pos] + '|' + display_text[cursor_rel_pos:]
+                else:
+                    display_text = display_text + '|'
+        
+        if display_text:
+            cv2.putText(canvas, display_text, (x + 5, y + 20), cv2.FONT_HERSHEY_SIMPLEX, self.font_scale, self.colors['text'], self.font_thickness)
     
-    def create_overlay_debug_tab(self):
-        return [
-            [sg.Checkbox('Show Overlay', default=cfg.show_overlay, key='show_overlay')],
-            [sg.Checkbox('Overlay Show Boxes', default=cfg.overlay_show_boxes, key='overlay_show_boxes')],
-            [sg.Checkbox('Overlay Show Borders', default=cfg.overlay_show_borders, key='overlay_show_borders')],
-            [sg.Checkbox('Show Window', default=cfg.show_window, key='show_window')],
-            [sg.Checkbox('Show Boxes', default=cfg.show_boxes, key='show_boxes')],
-            [sg.Checkbox('Show Labels', default=cfg.show_labels, key='show_labels')],
-            [sg.Checkbox('Show Conf', default=cfg.show_conf, key='show_conf')],
-            [sg.Text('Debug Window Scale %:', size=(20, 1)), sg.Slider(range=(50, 200), default_value=cfg.debug_window_scale_percent, orientation='h', size=(20, 15), key='debug_window_scale_percent')]
-        ]
+    def draw_status_bar(self, canvas):
+        status_y = self.canvas_height - 30
+        
+        cv2.rectangle(canvas, (0, status_y), (self.canvas_width, self.canvas_height), (30, 30, 30), -1)
+        cv2.line(canvas, (0, status_y), (self.canvas_width, status_y), self.colors['border'], 1)
+        
+        status_text = 'F5: Toggle | ESC: Close | Click tabs to switch | Click and drag sliders to adjust | Click checkboxes/inputs to toggle/edit'
+        text_size = cv2.getTextSize(status_text, cv2.FONT_HERSHEY_SIMPLEX, 0.4, 1)[0]
+        text_x = (self.canvas_width - text_size[0]) // 2
+        text_y = status_y + 20
+        cv2.putText(canvas, status_text, (text_x, text_y), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (150, 150, 150), 1)
     
-    def handle_value_change(self, event, values):
+    def mouse_callback(self, event, x, y, flags, param):
+        self.mouse_pos = (x, y)
+        
+        if event == cv2.EVENT_LBUTTONDOWN:
+            self.handle_click(x, y)
+        elif event == cv2.EVENT_MOUSEMOVE:
+            self.handle_mouse_move(x, y)
+        elif event == cv2.EVENT_LBUTTONUP:
+            self.dragging = False
+            self.resizing = False
+    
+    def handle_click(self, x, y):
+        tab_height = 40
+        
+        if y < tab_height:
+            tab_index = x // (self.canvas_width // self.num_tabs)
+            if 0 <= tab_index < self.num_tabs:
+                self.current_tab = tab_index
+                self.ui_elements = self.tab_elements[self.current_tab]
+                self.focused_input = None
+                return
+        
+        y_start = 60
+        row_height = 45
+        
+        for element in self.ui_elements:
+            if element['type'] == 'slider':
+                elem_y = y_start + self.ui_elements.index(element) * row_height
+                if (element['x'] <= x <= element['x'] + element['w'] and
+                    elem_y <= y <= elem_y + 30):
+                    self.update_slider(element, x)
+                    return
+            elif element['type'] == 'checkbox':
+                elem_y = y_start + self.ui_elements.index(element) * row_height
+                if (element['x'] <= x <= element['x'] + element['w'] + 150 and
+                    elem_y <= y <= elem_y + element['h']):
+                    element['value'] = not element['value']
+                    self.update_cfg_value(element['key'], element['value'])
+                    self.save_config_file()
+                    return
+            elif element['type'] == 'input':
+                elem_y = y_start + self.ui_elements.index(element) * row_height
+                if (element['x'] <= x <= element['x'] + element['w'] and
+                    elem_y <= y <= elem_y + element['h']):
+                    self.focused_input = element['key']
+                    self.input_cursor_pos = len(element['value'])
+                    
+                    char_width = 8
+                    self.input_cursor_pos = min(self.input_cursor_pos, (x - element['x'] - 5) // char_width)
+                    self.input_cursor_pos = min(self.input_cursor_pos, len(element['value']))
+                    return
+                else:
+                    if self.focused_input == element['key']:
+                        self.save_input_value(element)
+    
+    def handle_mouse_move(self, x, y):
+        if self.dragging:
+            dx = x - self.drag_start[0]
+            dy = y - self.drag_start[1]
+            self.window_pos = (self.window_pos[0] + dx, self.window_pos[1] + dy)
+            self.drag_start = (x, y)
+            cv2.moveWindow(self.window_name, self.window_pos[0], self.window_pos[1])
+        elif self.resizing:
+            dx = x - self.resize_start[0]
+            dy = y - self.resize_start[1]
+            new_width = max(self.min_width, self.canvas_width + dx)
+            new_height = max(self.min_height, self.canvas_height + dy)
+            self.canvas_width = new_width
+            self.canvas_height = new_height
+            self.resize_start = (x, y)
+            cv2.resizeWindow(self.window_name, self.canvas_width, self.canvas_height)
+        else:
+            tab_height = 40
+            
+            if y < tab_height:
+                tab_index = x // (self.canvas_width // self.num_tabs)
+                if 0 <= tab_index < self.num_tabs:
+                    if tab_index != self.current_tab:
+                        self.current_tab = tab_index
+                        self.ui_elements = self.tab_elements[self.current_tab]
+    
+    def update_slider(self, element, x):
+        min_val = element['min']
+        max_val = element['max']
+        
+        ratio = max(0, min(1, (x - element['x']) / element['w']))
+        new_value = min_val + ratio * (max_val - min_val)
+        
+        if element.get('is_int', False):
+            new_value = int(round(new_value))
+        else:
+            new_value = round(new_value, 2)
+        
+        element['value'] = new_value
+        self.update_cfg_value(element['key'], new_value)
+        self.save_config_file()
+    
+    def handle_keyboard(self, key):
+        if self.focused_input is None:
+            return
+        
+        for element in self.ui_elements:
+            if element['key'] == self.focused_input:
+                current_value = element['value']
+                max_len = element.get('max_len', 20)
+                
+                if key == 8:
+                    if self.input_cursor_pos > 0:
+                        current_value = current_value[:self.input_cursor_pos - 1] + current_value[self.input_cursor_pos:]
+                        self.input_cursor_pos -= 1
+                elif key == 127:
+                    if self.input_cursor_pos < len(current_value):
+                        current_value = current_value[:self.input_cursor_pos] + current_value[self.input_cursor_pos + 1:]
+                elif key == 13:
+                    self.save_input_value(element)
+                    self.focused_input = None
+                elif key == 27:
+                    self.focused_input = None
+                elif 32 <= key <= 126:
+                    if len(current_value) < max_len:
+                        char = chr(key)
+                        current_value = current_value[:self.input_cursor_pos] + char + current_value[self.input_cursor_pos:]
+                        self.input_cursor_pos += 1
+                
+                element['value'] = current_value
+                break
+    
+    def save_input_value(self, element):
         try:
-            if event.startswith('slider-'):
-                key = event.replace('slider-', '')
-                value = values[event]
-                self.update_cfg_value(key, value)
-            elif event.startswith('checkbox-'):
-                key = event.replace('checkbox-', '')
-                value = values[event]
-                self.update_cfg_value(key, value)
-            elif event.startswith('input-'):
-                key = event.replace('input-', '')
-                value = values[event]
-                self.update_cfg_value(key, value)
-            elif event in values:
-                key = event
-                value = values[event]
-                self.update_cfg_value(key, value)
-        except Exception as e:
-            logger.error(f'[Config GUI] Error handling value change: {e}')
+            key = element['key']
+            value = element['value']
+            
+            if element.get('is_int', False):
+                value = int(value)
+            
+            self.update_cfg_value(key, value)
+            self.save_config_file()
+        except (ValueError, TypeError):
+            pass
     
     def update_cfg_value(self, key, value):
         try:
@@ -200,7 +570,7 @@ class ConfigEditor(threading.Thread):
                         capture.restart()
                     except:
                         pass
-                        
+                
                 logger.info(f'[Config GUI] Updated {key}: {original_value} -> {value}')
         except Exception as e:
             logger.error(f'[Config GUI] Error updating config value: {e}')
@@ -213,7 +583,7 @@ class ConfigEditor(threading.Thread):
             detection_keys = ['detection_window_width', 'detection_window_height', 'circle_capture']
             capture_keys = ['capture_fps', 'Bettercam_capture', 'Obs_capture', 'mss_capture']
             aim_keys = ['body_y_offset', 'hideout_targets', 'disable_headshot', 'disable_prediction',
-                        'prediction_interval', 'third_person', 'own_player_filter_zone']
+                        'prediction_interval', 'third_person', 'own_player_filter_zone_size']
             hotkey_keys = ['hotkey_targeting', 'hotkey_exit', 'hotkey_pause', 'hotkey_reload_config',
                           'hotkey_toggle_own_player_filter', 'hotkey_switch_filter_side']
             mouse_keys = ['mouse_dpi', 'mouse_sensitivity', 'mouse_fov_width', 'mouse_fov_height',
@@ -268,8 +638,10 @@ class ConfigEditor(threading.Thread):
                 if hasattr(cfg, key):
                     val = getattr(cfg, key)
                     if isinstance(val, bool):
-                        config.set('overlay' if key.startswith('show_overlay') or key.startswith('overlay') else 'Debug window', 
-                                  key, 'True' if val else 'False')
+                        if key.startswith('show_overlay') or key.startswith('overlay'):
+                            config.set('overlay', key, 'True' if val else 'False')
+                        else:
+                            config.set('Debug window', key, 'True' if val else 'False')
                     else:
                         config.set('Debug window', key, str(val))
             
@@ -282,93 +654,39 @@ class ConfigEditor(threading.Thread):
     
     def save_position(self):
         try:
-            if self.window:
-                x, y = self.window.current_location()
-                config = configparser.ConfigParser()
-                config.read('config.ini')
-                
-                if not config.has_section('Config GUI'):
-                    config.add_section('Config GUI')
-                
-                config.set('Config GUI', 'config_gui_pos_x', str(x))
-                config.set('Config GUI', 'config_gui_pos_y', str(y))
-                
-                with open('config.ini', 'w', encoding='utf-8') as f:
-                    config.write(f)
+            x, y = self.window_pos
+            config = configparser.ConfigParser()
+            config.read('config.ini')
+            
+            if not config.has_section('Config GUI'):
+                config.add_section('Config GUI')
+            
+            config.set('Config GUI', 'config_gui_pos_x', str(x))
+            config.set('Config GUI', 'config_gui_pos_y', str(y))
+            
+            with open('config.ini', 'w', encoding='utf-8') as f:
+                config.write(f)
         except Exception as e:
             logger.error(f'[Config GUI] Error saving position: {e}')
     
-    def reset_to_defaults(self):
+    def cleanup(self):
         try:
-            defaults = {
-                'detection_window_width': 320,
-                'detection_window_height': 320,
-                'circle_capture': True,
-                'capture_fps': 60,
-                'Bettercam_capture': False,
-                'Obs_capture': False,
-                'mss_capture': True,
-                'body_y_offset': 0.1,
-                'hideout_targets': True,
-                'disable_headshot': False,
-                'disable_prediction': False,
-                'prediction_interval': 2.0,
-                'third_person': True,
-                'own_player_filter_zone': 0.35,
-                'hotkey_targeting': 'RightMouseButton',
-                'hotkey_exit': 'F2',
-                'hotkey_pause': 'F3',
-                'hotkey_reload_config': 'F4',
-                'hotkey_toggle_own_player_filter': 'Comma',
-                'hotkey_switch_filter_side': 'Period',
-                'mouse_dpi': 1100,
-                'mouse_sensitivity': 3.0,
-                'mouse_fov_width': 40,
-                'mouse_fov_height': 40,
-                'mouse_min_speed_multiplier': 1.0,
-                'mouse_max_speed_multiplier': 1.5,
-                'mouse_lock_target': False,
-                'mouse_auto_aim': False,
-                'mouse_ghub': False,
-                'mouse_rzr': False,
-                'auto_shoot': False,
-                'triggerbot': False,
-                'force_click': False,
-                'bScope_multiplier': 1.0,
-                'AI_conf': 0.2,
-                'AI_device': '0',
-                'AI_enable_AMD': False,
-                'disable_tracker': False,
-                'show_overlay': False,
-                'overlay_show_boxes': False,
-                'overlay_show_borders': True,
-                'show_window': False,
-                'show_boxes': True,
-                'show_labels': False,
-                'show_conf': True,
-                'debug_window_scale_percent': 100
-            }
-            
-            for key, value in defaults.items():
-                if hasattr(cfg, key):
-                    setattr(cfg, key, value)
-            
-            self.refresh_window()
-            self.save_config_file()
-            logger.info('[Config GUI] Reset to defaults')
+            self.save_position()
+            if self.window is not None:
+                cv2.destroyWindow(self.window_name)
         except Exception as e:
-            logger.error(f'[Config GUI] Error resetting defaults: {e}')
-    
-    def refresh_window(self):
-        self.window.close()
-        self.create_window()
+            logger.error(f'[Config GUI] Error during cleanup: {e}')
     
     def toggle_visibility(self):
         self.visible = not self.visible
         if self.visible:
-            self.window.un_hide()
+            cv2.imshow(self.window_name, np.zeros((100, 100, 3), dtype=np.uint8))
+            cv2.setMouseCallback(self.window_name, self.mouse_callback)
         else:
-            self.window.hide()
+            try:
+                cv2.destroyWindow(self.window_name)
+            except:
+                pass
 
 
 def launch_config_gui():
