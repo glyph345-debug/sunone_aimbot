@@ -1,7 +1,10 @@
 import configparser
 import random
+import threading
 
 from logic.logger import logger
+
+cfg_file_lock = threading.RLock()
 
 class Config():
     def __init__(self):
@@ -11,8 +14,9 @@ class Config():
     
     def Read(self, verbose=False):
         try:
-            with open("config.ini", "r", encoding="utf-8",) as f:
-                self.config.read_file(f)
+            with cfg_file_lock:
+                with open("config.ini", "r", encoding="utf-8") as f:
+                    self.config.read_file(f)
         except FileNotFoundError:
             logger.error("[Config] Config file not found!")
             quit()

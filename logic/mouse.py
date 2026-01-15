@@ -230,10 +230,15 @@ class MouseThread:
         self.disable_prediction = cfg.disable_prediction
         self.prediction_interval = cfg.prediction_interval
         self.bScope_multiplier = cfg.bScope_multiplier
+        self.min_speed_multiplier = cfg.mouse_min_speed_multiplier
+        self.max_speed_multiplier = cfg.mouse_max_speed_multiplier
         self.screen_width = cfg.detection_window_width
         self.screen_height = cfg.detection_window_height
         self.center_x = self.screen_width / 2
         self.center_y = self.screen_height / 2
+        self.max_distance = math.sqrt(self.screen_width**2 + self.screen_height**2) / 2
+        self.section_size_x = self.screen_width / 100
+        self.section_size_y = self.screen_height / 100
 
     def visualize_target(self, target_x, target_y, target_cls):
         if (cfg.show_window and cfg.show_target_line) or (cfg.show_overlay and cfg.show_target_line):
