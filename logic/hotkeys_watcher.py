@@ -48,7 +48,7 @@ class HotkeysWatcher(threading.Thread):
     def process_hotkeys(self, cfg_reload_prev_state, toggle_config_editor_prev_state):
         pause_vk = Buttons.KEY_CODES.get(cfg.hotkey_pause)
         reload_vk = Buttons.KEY_CODES.get(cfg.hotkey_reload_config)
-        toggle_vk = Buttons.KEY_CODES.get(cfg.hotkey_toggle_config_editor, Buttons.KEY_CODES.get('F5', 116))
+        toggle_vk = Buttons.KEY_CODES.get(cfg.hotkey_toggle_config_editor, Buttons.KEY_CODES.get('F1', 112))
 
         self.app_pause = 1 if (pause_vk and (win32api.GetAsyncKeyState(pause_vk) & 0x8000)) else 0
         app_reload_cfg = 1 if (reload_vk and (win32api.GetAsyncKeyState(reload_vk) & 0x8000)) else 0
@@ -69,14 +69,14 @@ class HotkeysWatcher(threading.Thread):
                 global config_gui_thread, config_gui_enabled, _config_gui_instance
 
                 if not config_gui_enabled:
-                    # First F5 press - launch the GUI in a new thread
+                    # First F1 press - launch the GUI in a new thread
                     from logic.config_gui import launch_config_gui
                     _config_gui_instance = launch_config_gui()
                     config_gui_thread = _config_gui_instance
                     config_gui_enabled = True
                     logger.info('[Hotkeys] Launched Config GUI')
                 else:
-                    # Subsequent F5 presses - toggle visibility
+                    # Subsequent F1 presses - toggle visibility
                     if _config_gui_instance is not None and hasattr(_config_gui_instance, 'toggle_visibility'):
                         _config_gui_instance.toggle_visibility()
             except (ImportError, AttributeError) as e:
