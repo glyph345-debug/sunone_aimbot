@@ -62,18 +62,10 @@ def init():
             if cfg.circle_capture:
                 image = capture.convert_to_circle(image)
 
-            detection_image = image
-            if cfg.third_person and hotkeys_watcher.filter_own_player_enabled:
-                detection_image = capture.apply_detection_mask(
-                    detection_image,
-                    hotkeys_watcher.filter_own_player_side,
-                    cfg.own_player_filter_zone_size,
-                )
-                
             if cfg.show_window or cfg.show_overlay:
                 visuals.queue.put(image)
                 
-            result = perform_detection(model, detection_image, tracker)
+            result = perform_detection(model, image, tracker)
 
             if hotkeys_watcher.app_pause == 0:
                 frameParser.parse(result)

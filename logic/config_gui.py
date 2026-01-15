@@ -132,9 +132,7 @@ class ConfigEditor(threading.Thread):
             {'type': 'slider', 'key': 'prediction_interval', 'x': slider_x, 'y': y_offset + row_height * 4, 'w': slider_width, 'h': 20,
              'min': 0.5, 'max': 5.0, 'value': cfg.prediction_interval, 'label': 'Prediction Interval:', 'label_x': label_x},
             {'type': 'checkbox', 'key': 'third_person', 'x': label_x, 'y': y_offset + row_height * 5, 'w': 20, 'h': 20,
-             'value': cfg.third_person, 'label': 'Third Person'},
-            {'type': 'slider', 'key': 'own_player_filter_zone_size', 'x': slider_x, 'y': y_offset + row_height * 6, 'w': slider_width, 'h': 20,
-             'min': 0.0, 'max': 1.0, 'value': cfg.own_player_filter_zone_size, 'label': 'Own Player Filter Zone:', 'label_x': label_x}
+             'value': cfg.third_person, 'label': 'Third Person'}
         ]
         
         y_offset = 60
@@ -147,11 +145,7 @@ class ConfigEditor(threading.Thread):
             {'type': 'input', 'key': 'hotkey_pause', 'x': slider_x, 'y': y_offset + row_height * 2, 'w': input_width, 'h': 30,
              'value': str(cfg.hotkey_pause), 'label': 'Pause Key:', 'label_x': label_x, 'max_len': 20},
             {'type': 'input', 'key': 'hotkey_reload_config', 'x': slider_x, 'y': y_offset + row_height * 3, 'w': input_width, 'h': 30,
-             'value': str(cfg.hotkey_reload_config), 'label': 'Reload Config Key:', 'label_x': label_x, 'max_len': 20},
-            {'type': 'input', 'key': 'hotkey_toggle_own_player_filter', 'x': slider_x, 'y': y_offset + row_height * 4, 'w': input_width, 'h': 30,
-             'value': str(cfg.hotkey_toggle_own_player_filter), 'label': 'Toggle Filter Key:', 'label_x': label_x, 'max_len': 20},
-            {'type': 'input', 'key': 'hotkey_switch_filter_side', 'x': slider_x, 'y': y_offset + row_height * 5, 'w': input_width, 'h': 30,
-             'value': str(cfg.hotkey_switch_filter_side), 'label': 'Switch Filter Side Key:', 'label_x': label_x, 'max_len': 20}
+             'value': str(cfg.hotkey_reload_config), 'label': 'Reload Config Key:', 'label_x': label_x, 'max_len': 20}
         ]
         
         y_offset = 60
@@ -648,12 +642,11 @@ class ConfigEditor(threading.Thread):
             detection_keys = ['detection_window_width', 'detection_window_height', 'circle_capture']
             capture_keys = ['capture_fps', 'Bettercam_capture', 'Obs_capture', 'mss_capture']
             aim_keys = ['body_y_offset', 'hideout_targets', 'disable_headshot', 'disable_prediction',
-                        'prediction_interval', 'third_person', 'own_player_filter_zone_size']
-            hotkey_keys = ['hotkey_targeting', 'hotkey_exit', 'hotkey_pause', 'hotkey_reload_config',
-                          'hotkey_toggle_own_player_filter', 'hotkey_switch_filter_side']
+                        'prediction_interval', 'third_person']
+            hotkey_keys = ['hotkey_targeting', 'hotkey_exit', 'hotkey_pause', 'hotkey_reload_config']
             mouse_keys = ['mouse_dpi', 'mouse_sensitivity', 'mouse_fov_width', 'mouse_fov_height',
-                         'mouse_min_speed_multiplier', 'mouse_max_speed_multiplier',
-                         'mouse_lock_target', 'mouse_auto_aim', 'mouse_ghub', 'mouse_rzr']
+                          'mouse_min_speed_multiplier', 'mouse_max_speed_multiplier',
+                          'mouse_lock_target', 'mouse_auto_aim', 'mouse_ghub', 'mouse_rzr']
             shooting_keys = ['auto_shoot', 'triggerbot', 'force_click', 'bScope_multiplier']
             ai_keys = ['AI_conf', 'AI_device', 'AI_enable_AMD', 'disable_tracker']
             overlay_keys = ['show_overlay', 'overlay_show_boxes', 'overlay_show_borders',

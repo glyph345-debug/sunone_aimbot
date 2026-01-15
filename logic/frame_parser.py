@@ -74,24 +74,9 @@ class FrameParser:
         else:
             boxes_array = frame.boxes.xywh.to(self.arch)
             classes_tensor = frame.boxes.cls.to(self.arch)
-        
+
         if not classes_tensor.numel():
             return None
-
-        if cfg.third_person and hotkeys_watcher.filter_own_player_enabled:
-            zone_size = max(0.0, min(1.0, cfg.own_player_filter_zone_size))
-
-            if hotkeys_watcher.filter_own_player_side == "left":
-                boundary_x = cfg.detection_window_width * zone_size
-                mask = boxes_array[:, 0] >= boundary_x
-            else:
-                boundary_x = cfg.detection_window_width * (1.0 - zone_size)
-                mask = boxes_array[:, 0] <= boundary_x
-
-            if mask.any():
-                return self._find_nearest_target(boxes_array[mask], classes_tensor[mask])
-            else:
-                return self._find_nearest_target(boxes_array, classes_tensor)
 
         return self._find_nearest_target(boxes_array, classes_tensor)
 

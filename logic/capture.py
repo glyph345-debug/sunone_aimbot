@@ -21,8 +21,6 @@ class Capture(threading.Thread):
         self._offset_x = None
         self._offset_y = None
 
-        self._detection_mask_cache: dict[tuple, np.ndarray] = {}
-        
         self.screen_x_center = int(cfg.detection_window_width / 2)
         self.screen_y_center = int(cfg.detection_window_height / 2)
 
@@ -198,63 +196,6 @@ Hotkeys:
         cv2.ellipse(mask, (width // 2, height // 2), (width // 2, height // 2), 0, 0, 360, 255, -1)
         return cv2.bitwise_and(image, cv2.merge([mask, mask, mask]))
 
-    def get_detection_mask(self, frame_shape, blocked_side: str, zone_size: float, circle_capture: bool | None = None) -> np.ndarray | None:
-        if circle_capture is None:
-            circle_capture = cfg.circle_capture
-
-        blocked_side = (blocked_side or "left").lower().strip()
-        if blocked_side not in ("left", "right"):
-            blocked_side = "left"
-
-        try:
-            zone_size = float(zone_size)
-        except (TypeError, ValueError):
-            zone_size = 0.0
-        zone_size = max(0.0, min(1.0, zone_size))
-
-        if zone_size <= 0.0:
-            return None
-
-        height, width = frame_shape[:2]
-        cache_key = (height, width, blocked_side, zone_size, circle_capture)
-        cached = self._detection_mask_cache.get(cache_key)
-        if cached is not None:
-            return cached
-
-        if circle_capture:
-            circle_mask = np.zeros((height, width), dtype=np.uint8)
-            cv2.ellipse(circle_mask, (width // 2, height // 2), (width // 2, height // 2), 0, 0, 360, 255, -1)
-
-            side_mask = np.zeros((height, width), dtype=np.uint8)
-            if blocked_side == "left":
-                boundary_x = int(width * zone_size)
-                side_mask[:, :boundary_x] = 255
-            else:
-                boundary_x = int(width * (1.0 - zone_size))
-                side_mask[:, boundary_x:] = 255
-
-            mask = cv2.bitwise_and(circle_mask, side_mask)
-        else:
-            mask = np.zeros((height, width), dtype=np.uint8)
-            if blocked_side == "left":
-                boundary_x = int(width * zone_size)
-                mask[:, :boundary_x] = 255
-            else:
-                boundary_x = int(width * (1.0 - zone_size))
-                mask[:, boundary_x:] = 255
-
-        self._detection_mask_cache[cache_key] = mask
-        return mask
-
-    def apply_detection_mask(self, frame: np.ndarray, blocked_side: str, zone_size: float) -> np.ndarray:
-        mask = self.get_detection_mask(frame.shape, blocked_side, zone_size)
-        if mask is None:
-            return frame
-
-        masked = frame.copy()
-        masked[mask > 0] = (0, 0, 0)
-        return masked
-    
     def Quit(self):
         self.running = False
         if cfg.Bettercam_capture and hasattr(self, 'bc') and self.bc.is_capturing:
