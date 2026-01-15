@@ -63,7 +63,9 @@ def init():
                 image = capture.convert_to_circle(image)
 
             if cfg.show_window or cfg.show_overlay:
-                visuals.queue.put(image)
+                # Queue always exists now, but check just in case
+                if hasattr(visuals, 'queue'):
+                    visuals.queue.put(image)
                 
             result = perform_detection(model, image, tracker)
 

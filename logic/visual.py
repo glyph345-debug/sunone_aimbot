@@ -17,18 +17,20 @@ from logic.logger import logger
 class Visuals(threading.Thread):
     def __init__(self):
         overlay.show(cfg.detection_window_width, cfg.detection_window_height)
-        
+
+        # Always initialize the queue, regardless of show_window/show_overlay settings
+        self.queue = queue.Queue(maxsize=1)
+
         if cfg.show_window or cfg.show_overlay:
             super(Visuals, self).__init__()
-            self.queue = queue.Queue(maxsize=1)
             self.daemon = True
             self.name = 'Visuals'
             self.image = None
             self.screenshot_taken = False
-            
+
             if cfg.show_window:
                 self.interpolation = cv2.INTER_NEAREST
-            
+
             self.draw_line_data = None
             self.draw_predicted_position_data = None
             self.draw_boxes_data = None
@@ -48,7 +50,7 @@ class Visuals(threading.Thread):
                 9: 'fire',
                 10: 'third_person'
             }
-            
+
             self.disabled_line_classes = [2, 3, 4, 8, 9, 10]
 
             self.start()
@@ -256,5 +258,76 @@ class Visuals(threading.Thread):
         
     def destroy(self):
         cv2.destroyAllWindows()
+
+    def start_if_not_running(self):
+        """Start the visuals thread if it's not already running"""
+        if not hasattr(self, 'is_alive'):
+            # Thread hasn't been initialized yet
+            super(Visuals, self).__init__()
+            self.daemon = True
+            self.name = 'Visuals'
+            self.image = None
+            self.screenshot_taken = False
+            
+            if cfg.show_window:
+                self.interpolation = cv2.INTER_NEAREST
+            
+            self.draw_line_data = None
+            self.draw_predicted_position_data = None
+            self.draw_boxes_data = None
+            self.draw_speed_data = None
+            self.draw_bScope_data = None
+            self.draw_history_point_data = []
+            self.cls_model_data = {
+                0: 'player',
+                1: 'bot',
+                2: 'weapon',
+                3: 'outline',
+                4: 'dead_body',
+                5: 'hideout_target_human',
+                6: 'hideout_target_balls',
+                7: 'head',
+                8: 'smoke',
+                9: 'fire',
+                10: 'third_person'
+            }
+            
+            self.disabled_line_classes = [2, 3, 4, 8, 9, 10]
+            
+            self.start()
+        elif not self.is_alive():
+            # Thread was running but has stopped, restart it
+            super(Visuals, self).__init__()
+            self.daemon = True
+            self.name = 'Visuals'
+            self.image = None
+            self.screenshot_taken = False
+            
+            if cfg.show_window:
+                self.interpolation = cv2.INTER_NEAREST
+            
+            self.draw_line_data = None
+            self.draw_predicted_position_data = None
+            self.draw_boxes_data = None
+            self.draw_speed_data = None
+            self.draw_bScope_data = None
+            self.draw_history_point_data = []
+            self.cls_model_data = {
+                0: 'player',
+                1: 'bot',
+                2: 'weapon',
+                3: 'outline',
+                4: 'dead_body',
+                5: 'hideout_target_human',
+                6: 'hideout_target_balls',
+                7: 'head',
+                8: 'smoke',
+                9: 'fire',
+                10: 'third_person'
+            }
+            
+            self.disabled_line_classes = [2, 3, 4, 8, 9, 10]
+            
+            self.start()
 
 visuals = Visuals()

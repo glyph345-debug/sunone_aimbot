@@ -42,7 +42,8 @@ class HotkeysWatcher(threading.Thread):
             if exit_vk and (win32api.GetAsyncKeyState(exit_vk) & 0xFF):
                 capture.Quit()
                 if cfg.show_window:
-                    visuals.queue.put(None)
+                    if hasattr(visuals, 'queue'):
+                        visuals.queue.put(None)
                 os._exit(0)
             
     def process_hotkeys(self, cfg_reload_prev_state, toggle_config_editor_prev_state):

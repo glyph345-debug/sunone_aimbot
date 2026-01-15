@@ -1149,12 +1149,17 @@ class ConfigEditor(threading.Thread):
             # Import required modules
             from logic.capture import capture
             from logic.mouse import mouse
+            from logic.visual import visuals
             
             # Restart capture
             capture.restart()
             
             # Update mouse settings
             mouse.update_settings()
+            
+            # Start visuals thread if overlay or window is enabled and it's not running
+            if cfg.show_overlay or cfg.show_window:
+                visuals.start_if_not_running()
             
             # Update active classes
             self.clss = self.active_classes()
