@@ -6,7 +6,7 @@ import os
 import time
 import win32api
 
-from logic.config_watcher import cfg
+from logic.config_watcher import cfg, cfg_file_lock
 from logic.buttons import Buttons
 from logic.logger import logger
 
@@ -75,6 +75,8 @@ class ConfigEditor(threading.Thread):
         self.input_cursor_timer = 0
         
         self.tab_elements = []
+        self.tab_rects = []
+        self.tab_bar_height = 40
         
         self.last_draw_time = 0
         self.needs_redraw = True
@@ -309,6 +311,7 @@ class ConfigEditor(threading.Thread):
             time.sleep(0.001)
     
     def draw(self):
+        self.sync_elements_from_cfg()
         canvas = np.full((self.canvas_height, self.canvas_width, 3), self.colors['bg'], dtype=np.uint8)
         
         self.draw_tabs(canvas)
@@ -320,35 +323,46 @@ class ConfigEditor(threading.Thread):
         self.needs_redraw = False
     
     def draw_tabs(self, canvas):
-        tab_width = self.canvas_width // self.num_tabs
-        tab_height = 40
-        
+        tab_height = 36
+        padding_x = 12
+        spacing = 10
+        margin_x = 10
+
+        self.tab_rects = []
+
+        x = margin_x
+        y = 0
+        row = 0
+
         for i, tab_name in enumerate(self.tab_names):
-            x1 = i * tab_width
-            y1 = 0
-            x2 = (i + 1) * tab_width
-            y2 = tab_height
-            
-            if i == self.current_tab:
-                color = self.colors['tab_active']
-            else:
-                color = self.colors['tab_inactive']
-            
+            text_size = cv2.getTextSize(tab_name, cv2.FONT_HERSHEY_SIMPLEX, self.font_scale, self.font_thickness)[0]
+            tab_width = max(90, text_size[0] + padding_x * 2)
+
+            if x + tab_width + margin_x > self.canvas_width and x > margin_x:
+                row += 1
+                x = margin_x
+                y = row * tab_height
+
+            x1, y1 = x, y
+            x2, y2 = x + tab_width, y + tab_height
+
+            self.tab_rects.append((i, x1, y1, x2, y2))
+
+            color = self.colors['tab_active'] if i == self.current_tab else self.colors['tab_inactive']
             cv2.rectangle(canvas, (x1, y1), (x2, y2), color, -1)
             cv2.rectangle(canvas, (x1, y1), (x2, y2), self.colors['border'], 1)
-            
-            text_x = x1 + 10
-            text_y = y1 + 25
-            
-            text_size = cv2.getTextSize(tab_name, cv2.FONT_HERSHEY_SIMPLEX, self.font_scale, self.font_thickness)[0]
-            center_x = x1 + (tab_width - text_size[0]) // 2
-            
-            cv2.putText(canvas, tab_name, (center_x, text_y), cv2.FONT_HERSHEY_SIMPLEX, self.font_scale, self.colors['text'], self.font_thickness)
-        
-        cv2.line(canvas, (0, tab_height), (self.canvas_width, tab_height), self.colors['border'], 2)
+
+            text_x = x1 + (tab_width - text_size[0]) // 2
+            text_y = y1 + int(tab_height * 0.7)
+            cv2.putText(canvas, tab_name, (text_x, text_y), cv2.FONT_HERSHEY_SIMPLEX, self.font_scale, self.colors['text'], self.font_thickness)
+
+            x = x2 + spacing
+
+        self.tab_bar_height = (row + 1) * tab_height
+        cv2.line(canvas, (0, self.tab_bar_height), (self.canvas_width, self.tab_bar_height), self.colors['border'], 2)
     
     def draw_ui_elements(self, canvas):
-        y_start = 60
+        y_start = self.tab_bar_height + 20
         row_height = 45
         
         for i, element in enumerate(self.ui_elements):
@@ -509,17 +523,16 @@ class ConfigEditor(threading.Thread):
             self.needs_redraw = True
     
     def handle_click(self, x, y):
-        tab_height = 40
+        if y < self.tab_bar_height:
+            for tab_index, x1, y1, x2, y2 in self.tab_rects:
+                if x1 <= x <= x2 and y1 <= y <= y2:
+                    if tab_index != self.current_tab:
+                        self.current_tab = tab_index
+                        self.ui_elements = self.tab_elements[self.current_tab]
+                    self.focused_input = None
+                    return
         
-        if y < tab_height:
-            tab_index = x // (self.canvas_width // self.num_tabs)
-            if 0 <= tab_index < self.num_tabs:
-                self.current_tab = tab_index
-                self.ui_elements = self.tab_elements[self.current_tab]
-                self.focused_input = None
-                return
-        
-        y_start = 60
+        y_start = self.tab_bar_height + 20
         row_height = 45
         
         for element in self.ui_elements:
@@ -569,14 +582,7 @@ class ConfigEditor(threading.Thread):
             self.resize_start = (x, y)
             cv2.resizeWindow(self.window_name, self.canvas_width, self.canvas_height)
         else:
-            tab_height = 40
-            
-            if y < tab_height:
-                tab_index = x // (self.canvas_width // self.num_tabs)
-                if 0 <= tab_index < self.num_tabs:
-                    if tab_index != self.current_tab:
-                        self.current_tab = tab_index
-                        self.ui_elements = self.tab_elements[self.current_tab]
+            pass
     
     def update_slider(self, element, x):
         min_val = element['min']
@@ -628,6 +634,19 @@ class ConfigEditor(threading.Thread):
                         updated = True
                 
                 element['value'] = current_value
+
+                if updated and key not in (13, 27):
+                    committed_value = None
+                    if element.get('is_int', False):
+                        if current_value.strip().isdigit():
+                            committed_value = int(current_value.strip())
+                    else:
+                        committed_value = current_value
+
+                    if committed_value is not None:
+                        self.update_cfg_value(element['key'], committed_value)
+                        self.save_config_file()
+
                 break
         
         if updated:
@@ -646,121 +665,191 @@ class ConfigEditor(threading.Thread):
         except (ValueError, TypeError):
             pass
     
+    def set_element_value(self, key, value):
+        for tab in self.tab_elements:
+            for element in tab:
+                if element.get('key') == key:
+                    element['value'] = value
+
     def update_cfg_value(self, key, value):
         try:
-            if hasattr(cfg, key):
-                original_value = getattr(cfg, key)
-                setattr(cfg, key, value)
-                
-                if key in ['mouse_dpi', 'mouse_sensitivity', 'mouse_fov_width', 'mouse_fov_height',
-                           'mouse_min_speed_multiplier', 'mouse_max_speed_multiplier']:
-                    try:
-                        from logic.mouse import mouse
-                        mouse.update_settings()
-                    except:
-                        pass
-                
-                if key in ['detection_window_width', 'detection_window_height', 'capture_fps']:
-                    try:
-                        from logic.capture import capture
-                        capture.restart()
-                    except:
-                        pass
-                
-                logger.info(f'[Config GUI] Updated {key}: {original_value} -> {value}')
+            if not hasattr(cfg, key):
+                return
+
+            original_value = getattr(cfg, key)
+            setattr(cfg, key, value)
+
+            capture_method_keys = ['Bettercam_capture', 'Obs_capture', 'mss_capture']
+
+            # Ensure only one capture method is enabled at a time, and never allow "none".
+            if key in capture_method_keys:
+                if bool(value):
+                    for other_key in capture_method_keys:
+                        if other_key != key and getattr(cfg, other_key, False):
+                            setattr(cfg, other_key, False)
+                            self.set_element_value(other_key, False)
+                else:
+                    if not any(getattr(cfg, k, False) for k in capture_method_keys):
+                        setattr(cfg, key, True)
+                        self.set_element_value(key, True)
+                        value = True
+
+            logger.info(f'[Config GUI] Updated {key}: {original_value} -> {value}')
         except Exception as e:
             logger.error(f'[Config GUI] Error updating config value: {e}')
     
+    def sync_elements_from_cfg(self):
+        for tab in self.tab_elements:
+            for element in tab:
+                key = element.get('key')
+                if not key or not hasattr(cfg, key):
+                    continue
+
+                if element['type'] == 'input':
+                    if self.focused_input == key:
+                        continue
+                    element['value'] = str(getattr(cfg, key))
+                else:
+                    element['value'] = getattr(cfg, key)
+
+    def apply_runtime_updates(self):
+        try:
+            from logic.capture import capture
+            capture.restart()
+        except Exception as e:
+            logger.error(f'[Config GUI] Error reloading capture: {e}')
+
+        try:
+            from logic.mouse import mouse
+            mouse.update_settings()
+        except Exception as e:
+            logger.error(f'[Config GUI] Error updating mouse settings: {e}')
+
+        try:
+            from logic.hotkeys_watcher import hotkeys_watcher
+            hotkeys_watcher.active_classes()
+        except Exception as e:
+            logger.error(f'[Config GUI] Error reloading active classes: {e}')
+
     def save_config_file(self):
         try:
-            config = configparser.ConfigParser()
-            config.read('config.ini')
-            
-            detection_keys = ['detection_window_width', 'detection_window_height', 'circle_capture']
-            capture_keys = ['capture_fps', 'Bettercam_capture', 'Obs_capture', 'mss_capture']
-            aim_keys = ['body_y_offset', 'hideout_targets', 'disable_headshot', 'disable_prediction',
-                        'prediction_interval', 'third_person']
-            hotkey_keys = ['hotkey_targeting', 'hotkey_exit', 'hotkey_pause', 'hotkey_reload_config']
-            mouse_keys = ['mouse_dpi', 'mouse_sensitivity', 'mouse_fov_width', 'mouse_fov_height',
-                          'mouse_min_speed_multiplier', 'mouse_max_speed_multiplier',
-                          'mouse_lock_target', 'mouse_auto_aim', 'mouse_ghub', 'mouse_rzr']
-            shooting_keys = ['auto_shoot', 'triggerbot', 'force_click', 'bScope_multiplier']
-            ai_keys = ['AI_conf', 'AI_device', 'AI_enable_AMD', 'disable_tracker']
-            overlay_keys = ['show_overlay', 'overlay_show_boxes', 'overlay_show_borders',
-                           'show_window', 'show_boxes', 'show_labels', 'show_conf', 'debug_window_scale_percent']
-            
-            for key in detection_keys:
-                if hasattr(cfg, key):
-                    config.set('Detection window', key, str(getattr(cfg, key)))
-            
-            for key in capture_keys:
-                if hasattr(cfg, key):
-                    config.set('Capture Methods', key, str(getattr(cfg, key)))
-            
-            for key in aim_keys:
-                if hasattr(cfg, key):
-                    config.set('Aim', key, str(getattr(cfg, key)))
-            
-            for key in hotkey_keys:
-                if hasattr(cfg, key):
-                    config.set('Hotkeys', key, str(getattr(cfg, key)))
-            
-            for key in mouse_keys:
-                if hasattr(cfg, key):
-                    val = getattr(cfg, key)
-                    if isinstance(val, bool):
-                        config.set('Mouse', key, 'True' if val else 'False')
-                    else:
-                        config.set('Mouse', key, str(val))
-            
-            for key in shooting_keys:
-                if hasattr(cfg, key):
-                    val = getattr(cfg, key)
-                    if isinstance(val, bool):
-                        config.set('Shooting', key, 'True' if val else 'False')
-                    else:
-                        config.set('Shooting', key, str(val))
-            
-            for key in ai_keys:
-                if hasattr(cfg, key):
-                    val = getattr(cfg, key)
-                    if isinstance(val, bool):
-                        config.set('AI', key, 'True' if val else 'False')
-                    else:
-                        config.set('AI', key, str(val))
-            
-            for key in overlay_keys:
-                if hasattr(cfg, key):
-                    val = getattr(cfg, key)
-                    if isinstance(val, bool):
-                        if key.startswith('show_overlay') or key.startswith('overlay'):
-                            config.set('overlay', key, 'True' if val else 'False')
+            with cfg_file_lock:
+                config = configparser.ConfigParser()
+                config.read('config.ini')
+
+                def ensure_section(section_name: str):
+                    if not config.has_section(section_name):
+                        config.add_section(section_name)
+
+                ensure_section('Detection window')
+                ensure_section('Capture Methods')
+                ensure_section('Aim')
+                ensure_section('Hotkeys')
+                ensure_section('Mouse')
+                ensure_section('Shooting')
+                ensure_section('Arduino')
+                ensure_section('AI')
+                ensure_section('overlay')
+                ensure_section('Debug window')
+
+                detection_keys = ['detection_window_width', 'detection_window_height', 'circle_capture']
+                capture_keys = ['capture_fps', 'Bettercam_capture', 'Obs_capture', 'mss_capture']
+                aim_keys = ['body_y_offset', 'hideout_targets', 'disable_headshot', 'disable_prediction',
+                            'prediction_interval', 'third_person']
+                hotkey_keys = ['hotkey_targeting', 'hotkey_exit', 'hotkey_pause', 'hotkey_reload_config']
+                mouse_keys = ['mouse_dpi', 'mouse_sensitivity', 'mouse_fov_width', 'mouse_fov_height',
+                              'mouse_min_speed_multiplier', 'mouse_max_speed_multiplier',
+                              'mouse_lock_target', 'mouse_auto_aim', 'mouse_ghub', 'mouse_rzr']
+                shooting_keys = ['auto_shoot', 'triggerbot', 'force_click', 'bScope_multiplier']
+                ai_keys = ['AI_conf', 'AI_device', 'AI_enable_AMD', 'disable_tracker']
+                overlay_keys = ['show_overlay', 'overlay_show_boxes', 'overlay_show_borders',
+                               'show_window', 'show_boxes', 'show_labels', 'show_conf', 'debug_window_scale_percent']
+
+                for key in detection_keys:
+                    if hasattr(cfg, key):
+                        config.set('Detection window', key, str(getattr(cfg, key)))
+
+                for key in capture_keys:
+                    if hasattr(cfg, key):
+                        val = getattr(cfg, key)
+                        if isinstance(val, bool):
+                            config.set('Capture Methods', key, 'True' if val else 'False')
                         else:
-                            config.set('Debug window', key, 'True' if val else 'False')
-                    else:
-                        config.set('Debug window', key, str(val))
-            
-            with open('config.ini', 'w', encoding='utf-8') as f:
-                config.write(f)
-            
-            logger.info('[Config GUI] Config saved to file')
+                            config.set('Capture Methods', key, str(val))
+
+                for key in aim_keys:
+                    if hasattr(cfg, key):
+                        val = getattr(cfg, key)
+                        if isinstance(val, bool):
+                            config.set('Aim', key, 'True' if val else 'False')
+                        else:
+                            config.set('Aim', key, str(val))
+
+                for key in hotkey_keys:
+                    if hasattr(cfg, key):
+                        config.set('Hotkeys', key, str(getattr(cfg, key)))
+
+                for key in mouse_keys:
+                    if hasattr(cfg, key):
+                        val = getattr(cfg, key)
+                        if isinstance(val, bool):
+                            config.set('Mouse', key, 'True' if val else 'False')
+                        else:
+                            config.set('Mouse', key, str(val))
+
+                for key in shooting_keys:
+                    if hasattr(cfg, key):
+                        val = getattr(cfg, key)
+                        if isinstance(val, bool):
+                            config.set('Shooting', key, 'True' if val else 'False')
+                        else:
+                            config.set('Shooting', key, str(val))
+
+                for key in ai_keys:
+                    if hasattr(cfg, key):
+                        val = getattr(cfg, key)
+                        if isinstance(val, bool):
+                            config.set('AI', key, 'True' if val else 'False')
+                        else:
+                            config.set('AI', key, str(val))
+
+                for key in overlay_keys:
+                    if hasattr(cfg, key):
+                        val = getattr(cfg, key)
+                        if isinstance(val, bool):
+                            if key.startswith('show_overlay') or key.startswith('overlay'):
+                                config.set('overlay', key, 'True' if val else 'False')
+                            else:
+                                config.set('Debug window', key, 'True' if val else 'False')
+                        else:
+                            config.set('Debug window', key, str(val))
+
+                with open('config.ini', 'w', encoding='utf-8') as f:
+                    config.write(f)
+
+            cfg.Read(verbose=False)
+            self.apply_runtime_updates()
+            self.sync_elements_from_cfg()
+
+            logger.info('[Config GUI] Config saved & applied')
         except Exception as e:
             logger.error(f'[Config GUI] Error saving config: {e}')
     
     def save_position(self):
         try:
             x, y = self.window_pos
-            config = configparser.ConfigParser()
-            config.read('config.ini')
-            
-            if not config.has_section('Config GUI'):
-                config.add_section('Config GUI')
-            
-            config.set('Config GUI', 'config_gui_pos_x', str(x))
-            config.set('Config GUI', 'config_gui_pos_y', str(y))
-            
-            with open('config.ini', 'w', encoding='utf-8') as f:
-                config.write(f)
+            with cfg_file_lock:
+                config = configparser.ConfigParser()
+                config.read('config.ini')
+                
+                if not config.has_section('Config GUI'):
+                    config.add_section('Config GUI')
+                
+                config.set('Config GUI', 'config_gui_pos_x', str(x))
+                config.set('Config GUI', 'config_gui_pos_y', str(y))
+                
+                with open('config.ini', 'w', encoding='utf-8') as f:
+                    config.write(f)
         except Exception as e:
             logger.error(f'[Config GUI] Error saving position: {e}')
     

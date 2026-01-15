@@ -38,45 +38,50 @@ class HotkeysWatcher(threading.Thread):
             )
                 
             # terminate
-            if win32api.GetAsyncKeyState(Buttons.KEY_CODES.get(cfg.hotkey_exit)) & 0xFF:
+            exit_vk = Buttons.KEY_CODES.get(cfg.hotkey_exit)
+            if exit_vk and (win32api.GetAsyncKeyState(exit_vk) & 0xFF):
                 capture.Quit()
                 if cfg.show_window:
                     visuals.queue.put(None)
                 os._exit(0)
             
     def process_hotkeys(self, cfg_reload_prev_state, toggle_config_editor_prev_state):
-        self.app_pause = win32api.GetKeyState(Buttons.KEY_CODES[cfg.hotkey_pause])
-        app_reload_cfg = win32api.GetKeyState(Buttons.KEY_CODES[cfg.hotkey_reload_config])
-        app_toggle_config_editor = win32api.GetKeyState(Buttons.KEY_CODES.get(cfg.hotkey_toggle_config_editor, Buttons.KEY_CODES.get('F5', 116)))
+        pause_vk = Buttons.KEY_CODES.get(cfg.hotkey_pause)
+        reload_vk = Buttons.KEY_CODES.get(cfg.hotkey_reload_config)
+        toggle_vk = Buttons.KEY_CODES.get(cfg.hotkey_toggle_config_editor, Buttons.KEY_CODES.get('F5', 116))
 
-        if app_reload_cfg != cfg_reload_prev_state:
-            if app_reload_cfg in (1, 0):
-                cfg.Read(verbose=True)
-                capture.restart()
-                mouse.update_settings()
-                self.clss = self.active_classes()
-                if cfg.show_window == False:
-                    cv2.destroyAllWindows()
-        
-        if app_toggle_config_editor != toggle_config_editor_prev_state:
-            if app_toggle_config_editor in (1, 0):
-                try:
-                    global config_gui_thread, config_gui_enabled, _config_gui_instance
-                    
-                    if not config_gui_enabled:
-                        # First F5 press - launch the GUI in a new thread
-                        from logic.config_gui import launch_config_gui
-                        _config_gui_instance = launch_config_gui()
-                        config_gui_thread = _config_gui_instance
-                        config_gui_enabled = True
-                        logger.info('[Hotkeys] Launched Config GUI')
-                    else:
-                        # Subsequent F5 presses - toggle visibility
-                        if _config_gui_instance is not None and hasattr(_config_gui_instance, 'toggle_visibility'):
-                            _config_gui_instance.toggle_visibility()
-                except (ImportError, AttributeError) as e:
-                    logger.error(f'[Hotkeys] Error toggling config GUI: {e}')
-        
+        self.app_pause = 1 if (pause_vk and (win32api.GetAsyncKeyState(pause_vk) & 0x8000)) else 0
+        app_reload_cfg = 1 if (reload_vk and (win32api.GetAsyncKeyState(reload_vk) & 0x8000)) else 0
+        app_toggle_config_editor = 1 if (toggle_vk and (win32api.GetAsyncKeyState(toggle_vk) & 0x8000)) else 0
+
+        if app_reload_cfg and not cfg_reload_prev_state:
+            logger.info('[Hotkeys] Reloading config')
+            cfg.Read(verbose=True)
+            capture.restart()
+            mouse.update_settings()
+            self.clss = self.active_classes()
+            logger.info('[Hotkeys] Config reload applied (capture/mouse/classes)')
+            if cfg.show_window == False:
+                cv2.destroyAllWindows()
+
+        if app_toggle_config_editor and not toggle_config_editor_prev_state:
+            try:
+                global config_gui_thread, config_gui_enabled, _config_gui_instance
+
+                if not config_gui_enabled:
+                    # First F5 press - launch the GUI in a new thread
+                    from logic.config_gui import launch_config_gui
+                    _config_gui_instance = launch_config_gui()
+                    config_gui_thread = _config_gui_instance
+                    config_gui_enabled = True
+                    logger.info('[Hotkeys] Launched Config GUI')
+                else:
+                    # Subsequent F5 presses - toggle visibility
+                    if _config_gui_instance is not None and hasattr(_config_gui_instance, 'toggle_visibility'):
+                        _config_gui_instance.toggle_visibility()
+            except (ImportError, AttributeError) as e:
+                logger.error(f'[Hotkeys] Error toggling config GUI: {e}')
+
         cfg_reload_prev_state = app_reload_cfg
         toggle_config_editor_prev_state = app_toggle_config_editor
         return cfg_reload_prev_state, toggle_config_editor_prev_state
@@ -94,5 +99,6 @@ class HotkeysWatcher(threading.Thread):
             clss.append(10.0)
         
         self.clss = clss
+        return clss
     
 hotkeys_watcher = HotkeysWatcher()
