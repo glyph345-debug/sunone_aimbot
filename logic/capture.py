@@ -289,7 +289,6 @@ Hotkeys:
 [{cfg.hotkey_exit}] - EXIT
 [{cfg.hotkey_pause}] - PAUSE AIM
 [{cfg.hotkey_reload_config}] - Reload config
-[{cfg.hotkey_toggle_config_editor}] - Toggle Config Editor
 """)
     
     def convert_to_circle(self, image):
