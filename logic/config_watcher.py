@@ -131,19 +131,6 @@ class Config():
         self.debug_window_screenshot_key = str(self.config_Debug_window["debug_window_screenshot_key"])
         self.debug_window_name = self.window_name
         
-        # Config GUI
-        self.config_gui_enabled = True
-        self.config_gui_pos_x = 400
-        self.config_gui_pos_y = 100
-        self.hotkey_toggle_config_editor = 'F5'
-        
-        if 'Config GUI' in self.config.sections():
-            self.config_Config_GUI = self.config["Config GUI"]
-            self.config_gui_enabled = self.config_Config_GUI.getboolean("config_gui_enabled")
-            self.config_gui_pos_x = int(self.config_Config_GUI["config_gui_pos_x"])
-            self.config_gui_pos_y = int(self.config_Config_GUI["config_gui_pos_y"])
-            self.hotkey_toggle_config_editor = str(self.config_Config_GUI["hotkey_toggle_config_editor"])
-        
         if verbose:
             logger.info("[Config] Config reloaded")
             
