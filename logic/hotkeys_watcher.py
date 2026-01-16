@@ -89,17 +89,24 @@ class HotkeysWatcher(threading.Thread):
 
     def active_classes(self) -> List[int]:
         clss = [0.0, 1.0]
-        
+
         if cfg.hideout_targets:
             clss.extend([5.0, 6.0])
 
         if not cfg.disable_headshot:
             clss.append(7.0)
-            
+
         if cfg.third_person:
             clss.append(10.0)
-        
+
         self.clss = clss
         return clss
-    
+
+def clear_config_gui_instance():
+    """Clear the global config GUI instance to allow a fresh launch"""
+    global config_gui_thread, config_gui_enabled, _config_gui_instance
+    config_gui_enabled = False
+    _config_gui_instance = None
+    config_gui_thread = None
+
 hotkeys_watcher = HotkeysWatcher()
