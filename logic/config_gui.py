@@ -1,1217 +1,706 @@
-import threading
-import cv2
-import numpy as np
-import configparser
+import tkinter as tk
+from tkinter import ttk, messagebox
 import os
+import sys
 import time
-import win32api
+import configparser
+import platform
 
-from logic.config_watcher import cfg, cfg_file_lock
-from logic.buttons import Buttons
-from logic.logger import logger
-
-
-class ConfigEditor(threading.Thread):
-    def __init__(self):
-        super(ConfigEditor, self).__init__()
-        self.daemon = True
-        self.name = 'ConfigEditor'
-        
-        self.window_name = 'Modern Config Editor'
-        self.window = None
-        self.running = True
-        self.visible = True
-        self.minimized = False
-        
-        self.current_tab = 0
-        self.num_tabs = 8
-        
-        self.tab_names = [
-            'Detection Window',
-            'Capture Methods',
-            'Aim Settings',
-            'Hotkeys',
-            'Mouse Settings',
-            'Shooting',
-            'AI Settings',
-            'Overlay & Debug'
-        ]
-        
-        self.mouse_pos = (0, 0)
-        self.dragging = False
-        self.drag_start = None
-        self.window_pos = (400, 100)
-        self.resizing = False
-        self.resize_start = None
-        self.resize_corner = None
-        
-        # Modern canvas size
-        self.canvas_width = 1000
-        self.canvas_height = 700
-        self.min_width = 900
-        self.min_height = 600
-        
-        # Modern font settings
-        self.font_scale = 0.6
-        self.font_thickness = 1
-        
-        # Modern dark grey/purple color scheme (OpenCV BGR tuples)
-        self.colors = {
-            'bg_start': (26, 26, 26),        # #1a1a1a
-            'bg_end': (26, 26, 26),
-            'text': (224, 224, 224),         # #e0e0e0
-            'text_shadow': (0, 0, 0),
-
-            'button_normal': (74, 74, 74),   # #4a4a4a
-            'button_hover': (90, 90, 90),
-            'button_active': (255, 51, 153), # #9933ff in BGR
-            'button_text': (255, 255, 255),
-
-            'slider_track': (51, 51, 51),    # #333333
-            'slider_handle': (255, 255, 0),  # #00ffff in BGR
-
-            'tab_active': (255, 51, 153),    # #9933ff in BGR
-            'tab_inactive': (74, 74, 74),
-
-            'input_bg': (42, 42, 42),        # #2a2a2a
-            'input_border': (74, 74, 74),
-
-            'checkbox_active': (255, 51, 153),
-            'checkbox_inactive': (74, 74, 74),
-
-            'border': (68, 68, 68),
-            'shadow': (0, 0, 0)
-        }
-        
-        # Physical buttons data
-        self.buttons = []
-        self.button_states = {}  # Track button hover/pressed states
-        
-        self.ui_elements = []
-        self.focused_input = None
-        self.input_cursor_pos = 0
-        self.input_cursor_visible = True
-        self.input_cursor_timer = 0
-        
-        # Slider dragging state
-        self.dragging_slider = None
-        self.dragging_slider_element = None
-        
-        self.tab_elements = []
-        self.tab_rects = []
-        self.tab_bar_height = 45
-        
-        self.last_draw_time = 0
-        self.needs_redraw = True
-        self.mouse_moved = False
-        self.key_pressed = False
-        self.fps_counter = 0
-        self.fps_start_time = time.time()
-        self.current_fps = 0
-        self.mouse_callback_time = 0
-        
-        self.init_ui_elements()
-        self.create_physical_buttons()
-        self.start()
+class DebouncedButton:
+    """Button wrapper with debouncing built-in"""
+    DEBOUNCE_TIME = 0.15  # 150ms debounce
     
-    def create_physical_buttons(self):
-        """Create physical buttons for the GUI"""
-        button_width = 120
-        button_height = 35
-        spacing = 10
-        start_x = self.canvas_width - (button_width * 4 + spacing * 3) - 20
-        start_y = 10
+    def __init__(self, parent, text, command, **kwargs):
+        self.button = ttk.Button(parent, command=self._debounced_handler, text=text, **kwargs)
+        self._command = command
+        self._last_click = 0
         
-        self.buttons = [
-            {'id': 'close_gui', 'text': 'Close GUI', 'x': start_x, 'y': start_y, 'w': button_width, 'h': button_height},
-            {'id': 'exit_program', 'text': 'Exit', 'x': start_x + (button_width + spacing), 'y': start_y, 'w': button_width, 'h': button_height},
-            {'id': 'reload_config', 'text': 'Reload', 'x': start_x + (button_width + spacing) * 2, 'y': start_y, 'w': button_width, 'h': button_height},
-            {'id': 'save_config', 'text': 'Save', 'x': start_x + (button_width + spacing) * 3, 'y': start_y, 'w': button_width, 'h': button_height}
-        ]
+    def _debounced_handler(self):
+        current_time = time.time()
+        if current_time - self._last_click >= self.DEBOUNCE_TIME:
+            self._last_click = current_time
+            if self._command:
+                self._command()
+    
+    def pack(self, **kwargs):
+        self.button.pack(**kwargs)
+    
+    def grid(self, **kwargs):
+        self.button.grid(**kwargs)
+    
+    def config(self, **kwargs):
+        self.button.config(**kwargs)
+
+class ConfigGUI:
+    """Complete Config GUI with all settings and debouncing"""
+    
+    def __init__(self, config, hotkeys_watcher, mouse, capture, visual, root=None):
+        self.cfg = config
+        self.hotkeys_watcher = hotkeys_watcher
+        self.mouse = mouse
+        self.capture = capture
+        self.visual = visual
         
-        # Initialize button states
-        for button in self.buttons:
-            self.button_states[button['id']] = {'hovered': False, 'pressed': False}
+        # Operation state flags
+        self.operation_in_progress = False
+        
+        # Create main window if not provided
+        if root is None:
+            self.root = tk.Tk()
+        else:
+            self.root = root
+            
+        self.setup_window()
+        self.create_widgets()
+        self.update_all_widgets()
     
-    def init_ui_elements(self):
-        self.ui_elements = []
-        self.tab_elements = []
-
-        # Layout is relative to the content area under the tab bar.
-        y_offset = 0
-        row_height = 50
-        label_x = 30
-        slider_x = 240
-        slider_width = 280
-        input_width = 180
-
-        self.tab_elements = [[] for _ in range(self.num_tabs)]
-
-        self.tab_elements[0] = [
-            {'type': 'slider', 'key': 'detection_window_width', 'x': slider_x, 'y': y_offset + row_height * 0, 'w': slider_width, 'h': 20,
-             'min': 200, 'max': 1920, 'value': cfg.detection_window_width, 'label': 'Window Width:', 'label_x': label_x, 'is_int': True, 'increment': 10},
-            {'type': 'slider', 'key': 'detection_window_height', 'x': slider_x, 'y': y_offset + row_height * 1, 'w': slider_width, 'h': 20,
-             'min': 200, 'max': 1080, 'value': cfg.detection_window_height, 'label': 'Window Height:', 'label_x': label_x, 'is_int': True, 'increment': 10},
-            {'type': 'checkbox', 'key': 'circle_capture', 'x': label_x, 'y': y_offset + row_height * 2, 'w': 20, 'h': 20,
-             'value': cfg.circle_capture, 'label': 'Circle Capture'}
-        ]
-
-        self.tab_elements[1] = [
-            {'type': 'checkbox', 'key': 'Bettercam_capture', 'x': label_x, 'y': y_offset + row_height * 0, 'w': 20, 'h': 20,
-             'value': cfg.Bettercam_capture, 'label': 'Bettercam Capture'},
-            {'type': 'checkbox', 'key': 'Obs_capture', 'x': label_x, 'y': y_offset + row_height * 1, 'w': 20, 'h': 20,
-             'value': cfg.Obs_capture, 'label': 'OBS Capture'},
-            {'type': 'checkbox', 'key': 'mss_capture', 'x': label_x, 'y': y_offset + row_height * 2, 'w': 20, 'h': 20,
-             'value': cfg.mss_capture, 'label': 'MSS Capture'},
-            {'type': 'slider', 'key': 'capture_fps', 'x': slider_x, 'y': y_offset + row_height * 3, 'w': slider_width, 'h': 20,
-             'min': 30, 'max': 120, 'value': cfg.capture_fps, 'label': 'Capture FPS:', 'label_x': label_x, 'is_int': True, 'increment': 10}
-        ]
-
-        self.tab_elements[2] = [
-            {'type': 'slider', 'key': 'body_y_offset', 'x': slider_x, 'y': y_offset + row_height * 0, 'w': slider_width, 'h': 20,
-             'min': 0.0, 'max': 0.5, 'value': cfg.body_y_offset, 'label': 'Body Y Offset:', 'label_x': label_x, 'increment': 0.01},
-            {'type': 'checkbox', 'key': 'hideout_targets', 'x': label_x, 'y': y_offset + row_height * 1, 'w': 20, 'h': 20,
-             'value': cfg.hideout_targets, 'label': 'Hideout Targets'},
-            {'type': 'checkbox', 'key': 'disable_headshot', 'x': label_x, 'y': y_offset + row_height * 2, 'w': 20, 'h': 20,
-             'value': cfg.disable_headshot, 'label': 'Disable Headshot'},
-            {'type': 'checkbox', 'key': 'disable_prediction', 'x': label_x, 'y': y_offset + row_height * 3, 'w': 20, 'h': 20,
-             'value': cfg.disable_prediction, 'label': 'Disable Prediction'},
-            {'type': 'slider', 'key': 'prediction_interval', 'x': slider_x, 'y': y_offset + row_height * 4, 'w': slider_width, 'h': 20,
-             'min': 0.5, 'max': 5.0, 'value': cfg.prediction_interval, 'label': 'Prediction Interval:', 'label_x': label_x, 'increment': 0.1},
-            {'type': 'checkbox', 'key': 'third_person', 'x': label_x, 'y': y_offset + row_height * 5, 'w': 20, 'h': 20,
-             'value': cfg.third_person, 'label': 'Third Person'}
-        ]
-
-        self.tab_elements[3] = [
-            {'type': 'input', 'key': 'hotkey_targeting', 'x': slider_x, 'y': y_offset + row_height * 0, 'w': input_width, 'h': 35,
-             'value': str(cfg.hotkey_targeting), 'label': 'Targeting Key:', 'label_x': label_x, 'max_len': 20},
-            {'type': 'input', 'key': 'hotkey_exit', 'x': slider_x, 'y': y_offset + row_height * 1, 'w': input_width, 'h': 35,
-             'value': str(cfg.hotkey_exit), 'label': 'Exit Key:', 'label_x': label_x, 'max_len': 20},
-            {'type': 'input', 'key': 'hotkey_pause', 'x': slider_x, 'y': y_offset + row_height * 2, 'w': input_width, 'h': 35,
-             'value': str(cfg.hotkey_pause), 'label': 'Pause Key:', 'label_x': label_x, 'max_len': 20},
-            {'type': 'input', 'key': 'hotkey_reload_config', 'x': slider_x, 'y': y_offset + row_height * 3, 'w': input_width, 'h': 35,
-             'value': str(cfg.hotkey_reload_config), 'label': 'Reload Config Key:', 'label_x': label_x, 'max_len': 20}
-        ]
-
-        self.tab_elements[4] = [
-            {'type': 'input', 'key': 'mouse_dpi', 'x': slider_x, 'y': y_offset + row_height * 0, 'w': input_width, 'h': 35,
-             'value': str(cfg.mouse_dpi), 'label': 'DPI:', 'label_x': label_x, 'max_len': 10, 'is_int': True},
-            {'type': 'slider', 'key': 'mouse_sensitivity', 'x': slider_x, 'y': y_offset + row_height * 1, 'w': slider_width, 'h': 20,
-             'min': 0.5, 'max': 10.0, 'value': cfg.mouse_sensitivity, 'label': 'Sensitivity:', 'label_x': label_x, 'increment': 0.1},
-            {'type': 'slider', 'key': 'mouse_fov_width', 'x': slider_x, 'y': y_offset + row_height * 2, 'w': slider_width, 'h': 20,
-             'min': 20, 'max': 200, 'value': cfg.mouse_fov_width, 'label': 'FOV Width:', 'label_x': label_x, 'is_int': True, 'increment': 10},
-            {'type': 'slider', 'key': 'mouse_fov_height', 'x': slider_x, 'y': y_offset + row_height * 3, 'w': slider_width, 'h': 20,
-             'min': 20, 'max': 200, 'value': cfg.mouse_fov_height, 'label': 'FOV Height:', 'label_x': label_x, 'is_int': True, 'increment': 10},
-            {'type': 'slider', 'key': 'mouse_min_speed_multiplier', 'x': slider_x, 'y': y_offset + row_height * 4, 'w': slider_width, 'h': 20,
-             'min': 0.5, 'max': 3.0, 'value': cfg.mouse_min_speed_multiplier, 'label': 'Min Speed Multiplier:', 'label_x': label_x, 'increment': 0.1},
-            {'type': 'slider', 'key': 'mouse_max_speed_multiplier', 'x': slider_x, 'y': y_offset + row_height * 5, 'w': slider_width, 'h': 20,
-             'min': 0.5, 'max': 3.0, 'value': cfg.mouse_max_speed_multiplier, 'label': 'Max Speed Multiplier:', 'label_x': label_x, 'increment': 0.1},
-            {'type': 'checkbox', 'key': 'mouse_lock_target', 'x': label_x, 'y': y_offset + row_height * 6, 'w': 20, 'h': 20,
-             'value': cfg.mouse_lock_target, 'label': 'Lock Target'},
-            {'type': 'checkbox', 'key': 'mouse_auto_aim', 'x': label_x + 180, 'y': y_offset + row_height * 6, 'w': 20, 'h': 20,
-             'value': cfg.mouse_auto_aim, 'label': 'Auto Aim'},
-            {'type': 'checkbox', 'key': 'mouse_ghub', 'x': label_x, 'y': y_offset + row_height * 7, 'w': 20, 'h': 20,
-             'value': cfg.mouse_ghub, 'label': 'G-Hub Mouse'},
-            {'type': 'checkbox', 'key': 'mouse_rzr', 'x': label_x + 180, 'y': y_offset + row_height * 7, 'w': 20, 'h': 20,
-             'value': cfg.mouse_rzr, 'label': 'Razer Mouse'}
-        ]
-
-        self.tab_elements[5] = [
-            {'type': 'checkbox', 'key': 'auto_shoot', 'x': label_x, 'y': y_offset + row_height * 0, 'w': 20, 'h': 20,
-             'value': cfg.auto_shoot, 'label': 'Auto Shoot'},
-            {'type': 'checkbox', 'key': 'triggerbot', 'x': label_x, 'y': y_offset + row_height * 1, 'w': 20, 'h': 20,
-             'value': cfg.triggerbot, 'label': 'Triggerbot'},
-            {'type': 'checkbox', 'key': 'force_click', 'x': label_x, 'y': y_offset + row_height * 2, 'w': 20, 'h': 20,
-             'value': cfg.force_click, 'label': 'Force Click'},
-            {'type': 'slider', 'key': 'bScope_multiplier', 'x': slider_x, 'y': y_offset + row_height * 3, 'w': slider_width, 'h': 20,
-             'min': 0.5, 'max': 3.0, 'value': cfg.bScope_multiplier, 'label': 'Scope Multiplier:', 'label_x': label_x, 'increment': 0.1}
-        ]
-
-        self.tab_elements[6] = [
-            {'type': 'slider', 'key': 'AI_conf', 'x': slider_x, 'y': y_offset + row_height * 0, 'w': slider_width, 'h': 20,
-             'min': 0.1, 'max': 0.9, 'value': cfg.AI_conf, 'label': 'AI Confidence:', 'label_x': label_x, 'increment': 0.01},
-            {'type': 'input', 'key': 'AI_device', 'x': slider_x, 'y': y_offset + row_height * 1, 'w': input_width, 'h': 35,
-             'value': str(cfg.AI_device), 'label': 'AI Device:', 'label_x': label_x, 'max_len': 10},
-            {'type': 'checkbox', 'key': 'AI_enable_AMD', 'x': label_x, 'y': y_offset + row_height * 2, 'w': 20, 'h': 20,
-             'value': cfg.AI_enable_AMD, 'label': 'Enable AMD'},
-            {'type': 'checkbox', 'key': 'disable_tracker', 'x': label_x, 'y': y_offset + row_height * 3, 'w': 20, 'h': 20,
-             'value': cfg.disable_tracker, 'label': 'Disable Tracker'}
-        ]
-
-        self.tab_elements[7] = [
-            {'type': 'checkbox', 'key': 'show_overlay', 'x': label_x, 'y': y_offset + row_height * 0, 'w': 20, 'h': 20,
-             'value': cfg.show_overlay, 'label': 'Show Overlay'},
-            {'type': 'checkbox', 'key': 'overlay_show_boxes', 'x': label_x, 'y': y_offset + row_height * 1, 'w': 20, 'h': 20,
-             'value': cfg.overlay_show_boxes, 'label': 'Overlay Show Boxes'},
-            {'type': 'checkbox', 'key': 'overlay_show_borders', 'x': label_x, 'y': y_offset + row_height * 2, 'w': 20, 'h': 20,
-             'value': cfg.overlay_show_borders, 'label': 'Overlay Show Borders'},
-            {'type': 'checkbox', 'key': 'show_window', 'x': label_x, 'y': y_offset + row_height * 3, 'w': 20, 'h': 20,
-             'value': cfg.show_window, 'label': 'Show Window'},
-            {'type': 'checkbox', 'key': 'show_boxes', 'x': label_x, 'y': y_offset + row_height * 4, 'w': 20, 'h': 20,
-             'value': cfg.show_boxes, 'label': 'Show Boxes'},
-            {'type': 'checkbox', 'key': 'show_labels', 'x': label_x, 'y': y_offset + row_height * 5, 'w': 20, 'h': 20,
-             'value': cfg.show_labels, 'label': 'Show Labels'},
-            {'type': 'checkbox', 'key': 'show_conf', 'x': label_x, 'y': y_offset + row_height * 6, 'w': 20, 'h': 20,
-             'value': cfg.show_conf, 'label': 'Show Conf'},
-            {'type': 'slider', 'key': 'debug_window_scale_percent', 'x': slider_x, 'y': y_offset + row_height * 7, 'w': slider_width, 'h': 20,
-             'min': 50, 'max': 200, 'value': cfg.debug_window_scale_percent, 'label': 'Debug Window Scale %:', 'label_x': label_x, 'is_int': True, 'increment': 10}
-        ]
-
-        self.ui_elements = self.tab_elements[self.current_tab]
-    
-    def run(self):
+    def setup_window(self):
+        """Setup main window properties"""
+        self.root.title("Configuration Editor")
+        self.root.geometry("850x700")
+        self.root.resizable(True, True)
+        
         try:
-            self.create_window()
-            self.main_loop()
-        except Exception as e:
-            logger.error(f'[Config GUI] Error in main loop: {e}')
-        finally:
-            self.cleanup()
+            if platform.system() == 'Windows':
+                self.root.iconbitmap('media/logo.ico')
+        except:
+            pass
     
-    def create_window(self):
-        pos_x = getattr(cfg, 'config_gui_pos_x', 400)
-        pos_y = getattr(cfg, 'config_gui_pos_y', 100)
+    def create_widgets(self):
+        """Create all GUI widgets"""
+        main_frame = ttk.Frame(self.root, padding="10")
+        main_frame.pack(fill=tk.BOTH, expand=True)
         
-        cv2.namedWindow(self.window_name, cv2.WINDOW_NORMAL)
-        cv2.resizeWindow(self.window_name, self.canvas_width, self.canvas_height)
-        cv2.moveWindow(self.window_name, pos_x, pos_y)
+        # Create notebook for tabs
+        self.notebook = ttk.Notebook(main_frame)
+        self.notebook.pack(fill=tk.BOTH, expand=True, pady=5)
         
-        cv2.setMouseCallback(self.window_name, self.mouse_callback)
-    
-    def main_loop(self):
-        target_fps = 30
-        frame_time = 1.0 / target_fps
-        last_time = time.time()
-        last_input_time = time.time()
+        # Create all tabs
+        self.create_detection_tab()
+        self.create_capture_tab()
+        self.create_aim_tab()
+        self.create_hotkeys_tab()
+        self.create_mouse_tab()
+        self.create_arduino_tab()
+        self.create_shooting_tab()
+        self.create_ai_tab()
+        self.create_overlay_tab()
+        self.create_debug_tab()
         
-        while self.running:
-            current_time = time.time()
-            elapsed = current_time - last_time
-            
-            if elapsed >= frame_time or self.needs_redraw:
-                if self.visible and not self.minimized:
-                    self.draw()
-                
-                self.fps_counter += 1
-                if current_time - self.fps_start_time >= 1.0:
-                    self.current_fps = self.fps_counter
-                    self.fps_counter = 0
-                    self.fps_start_time = current_time
-                
-                last_time = current_time
-            
-            input_elapsed = current_time - last_input_time
-            if input_elapsed >= frame_time:
-                self.input_cursor_timer += input_elapsed
-                if self.input_cursor_timer >= 0.5:
-                    self.input_cursor_visible = not self.input_cursor_visible
-                    self.input_cursor_timer = 0
-                    self.needs_redraw = True
-                
-                raw_key = cv2.waitKey(1)
-                key = raw_key & 0xFF
-                
-                # Only handle ESC key for closing - no more hotkey passthrough
-                if key == 27:
-                    self.toggle_visibility()
-                elif self.focused_input is not None and key != 255:
-                    self.handle_keyboard(key)
-                    self.needs_redraw = True
-                
-                if self.mouse_moved:
-                    self.needs_redraw = True
-                    self.mouse_moved = False
-                
-                last_input_time = current_time
-            
-            time.sleep(0.001)
-    
-    def draw(self):
-        self.sync_elements_from_cfg()
+        # Save/Reload buttons
+        button_frame = ttk.Frame(main_frame)
+        button_frame.pack(pady=10)
         
-        # Create gradient background
-        canvas = self.create_gradient_background()
+        self.save_button = DebouncedButton(
+            button_frame, 
+            text="Save & Apply", 
+            command=self.on_save_clicked
+        )
+        self.save_button.pack(side=tk.LEFT, padx=5)
         
-        # Draw UI components
-        self.draw_tabs(canvas)
-        self.draw_physical_buttons(canvas)
-        self.draw_ui_elements(canvas)
-        self.draw_status_bar(canvas)
-        self.draw_fps(canvas)
-        
-        cv2.imshow(self.window_name, canvas)
-        self.needs_redraw = False
+        self.reload_button = DebouncedButton(
+            button_frame, 
+            text="Reload from File", 
+            command=self.on_reload_clicked
+        )
+        self.reload_button.pack(side=tk.LEFT, padx=5)
     
-    def create_gradient_background(self):
-        """Create modern background (solid dark theme)."""
-        canvas = np.zeros((self.canvas_height, self.canvas_width, 3), dtype=np.uint8)
-        canvas[:, :] = self.colors['bg_start']
-        return canvas
-    
-    def draw_physical_buttons(self, canvas):
-        """Draw modern physical buttons with hover effects"""
-        for button in self.buttons:
-            x, y = button['x'], button['y']
-            w, h = button['w'], button['h']
-            text = button['text']
-            button_id = button['id']
-            
-            state = self.button_states[button_id]
-            is_hovered = state['hovered']
-            is_pressed = state['pressed']
-            
-            # Draw shadow
-            cv2.rectangle(canvas, (x + 2, y + 2), (x + w + 2, y + h + 2), self.colors['shadow'], -1)
-            
-            # Determine button color based on state
-            if is_pressed:
-                color = self.colors['button_active']
-            elif is_hovered:
-                color = self.colors['button_hover']
-            else:
-                color = self.colors['button_normal']
-            
-            # Draw button background with gradient effect
-            cv2.rectangle(canvas, (x, y), (x + w, y + h), color, -1)
-            cv2.rectangle(canvas, (x, y), (x + w, y + h), self.colors['border'], 2)
-            
-            # Draw text with shadow
-            text_size = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)[0]
-            text_x = x + (w - text_size[0]) // 2
-            text_y = y + (h + text_size[1]) // 2
-            
-            # Text shadow
-            cv2.putText(canvas, text, (text_x + 1, text_y + 1), cv2.FONT_HERSHEY_SIMPLEX, 0.5, self.colors['shadow'], 1)
-            # Main text
-            cv2.putText(canvas, text, (text_x, text_y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, self.colors['button_text'], 1)
-    
-    def draw_tabs(self, canvas):
-        tab_height = 42
-        padding_x = 15
-        spacing = 8
-        margin_x = 20
-        start_y = 55  # Below the physical buttons
-
-        self.tab_rects = []
-
-        x = margin_x
-        y = start_y
-        row = 0
-
-        for i, tab_name in enumerate(self.tab_names):
-            text_size = cv2.getTextSize(tab_name, cv2.FONT_HERSHEY_SIMPLEX, self.font_scale, self.font_thickness)[0]
-            tab_width = max(100, text_size[0] + padding_x * 2)
-
-            if x + tab_width + margin_x > self.canvas_width and x > margin_x:
-                row += 1
-                x = margin_x
-                y = start_y + row * tab_height
-
-            x1, y1 = x, y
-            x2, y2 = x + tab_width, y + tab_height
-
-            self.tab_rects.append((i, x1, y1, x2, y2))
-
-            # Modern tab design
-            if i == self.current_tab:
-                # Active tab - bright blue with shadow
-                cv2.rectangle(canvas, (x1 + 1, y1 + 1), (x2 - 1, y2 + 10), self.colors['shadow'], -1)
-                cv2.rectangle(canvas, (x1, y1), (x2, y2 + 10), self.colors['tab_active'], -1)
-                cv2.rectangle(canvas, (x1, y1), (x2, y2 + 10), self.colors['border'], 1)
-            else:
-                # Inactive tab - darker with hover effect
-                color = self.colors['tab_inactive']
-                if self.is_point_in_rect(self.mouse_pos, (x1, y1, x2, y2 + 10)):
-                    # Slightly brighter on hover
-                    color = tuple(min(255, c + 20) for c in color)
-                
-                cv2.rectangle(canvas, (x1, y1), (x2, y2 + 5), color, -1)
-                cv2.rectangle(canvas, (x1, y1), (x2, y2 + 5), self.colors['border'], 1)
-
-            # Tab text with shadow
-            text_x = x1 + (tab_width - text_size[0]) // 2
-            text_y = y1 + int(tab_height * 0.65)
-            
-            # Text shadow
-            cv2.putText(canvas, tab_name, (text_x + 1, text_y + 1), cv2.FONT_HERSHEY_SIMPLEX, self.font_scale, self.colors['shadow'], 1)
-            # Main text
-            cv2.putText(canvas, tab_name, (text_x, text_y), cv2.FONT_HERSHEY_SIMPLEX, self.font_scale, self.colors['text'], 1)
-
-            x = x2 + spacing
-
-        self.tab_bar_height = y + tab_height + 10
-        cv2.line(canvas, (margin_x, self.tab_bar_height), (self.canvas_width - margin_x, self.tab_bar_height), self.colors['border'], 2)
-    
-    def draw_ui_elements(self, canvas):
-        y_start = self.tab_bar_height + 25
-        
-        for element in self.ui_elements:
-            if element['type'] == 'slider':
-                self.draw_modern_slider(canvas, element, y_start)
-            elif element['type'] == 'checkbox':
-                self.draw_modern_checkbox(canvas, element, y_start)
-            elif element['type'] == 'input':
-                self.draw_modern_input(canvas, element, y_start)
-    
-    def draw_modern_slider(self, canvas, element, y_start):
-        y = y_start + int(element.get('y', 0))
-
-        x = element['x']
-        w = element['w']
-        min_val = element['min']
-        max_val = element['max']
-        value = element['value']
-        label = element['label']
-        label_x = element['label_x']
-
-        # Label
-        cv2.putText(canvas, label, (label_x + 1, y + 18), cv2.FONT_HERSHEY_SIMPLEX, self.font_scale, self.colors['shadow'], 1)
-        cv2.putText(canvas, label, (label_x, y + 17), cv2.FONT_HERSHEY_SIMPLEX, self.font_scale, self.colors['text'], 1)
-
-        # Slider track
-        track_y = y + 25
-        track_rect = (x, track_y, x + w, track_y + 6)
-        element['_track_rect'] = track_rect
-
-        cv2.rectangle(canvas, (track_rect[0], track_rect[1]), (track_rect[2], track_rect[3]), self.colors['slider_track'], -1)
-        cv2.rectangle(canvas, (track_rect[0], track_rect[1]), (track_rect[2], track_rect[3]), self.colors['border'], 1)
-
-        # Handle
-        range_val = max_val - min_val
-        handle_x = x
-        if range_val > 0:
-            ratio = (value - min_val) / range_val
-            ratio = max(0.0, min(1.0, ratio))
-            handle_x = int(x + ratio * w)
-
-        handle_center = (handle_x, track_y + 3)
-        element['_handle_center'] = handle_center
-
-        handle_radius = 9
-        cv2.circle(canvas, handle_center, handle_radius, self.colors['slider_handle'], -1)
-        cv2.circle(canvas, handle_center, handle_radius, self.colors['text'], 1)
-
-        # Value display
-        if element.get('is_int', False):
-            value_text = f'{int(round(float(value)))}'
-        else:
-            value_text = f'{float(value):.2f}'
-
-        value_x = x + w + 10
-        value_y = track_y + 5
-
-        cv2.putText(canvas, value_text, (value_x + 1, value_y + 1), cv2.FONT_HERSHEY_SIMPLEX, 0.5, self.colors['shadow'], 1)
-        cv2.putText(canvas, value_text, (value_x, value_y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, self.colors['text'], 1)
-
-        # Manual numeric input box
-        input_w = 70
-        input_h = 25
-        input_x = x + w + 60
-        input_y = y + 10
-        input_rect = (input_x, input_y, input_x + input_w, input_y + input_h)
-        element['_input_rect'] = input_rect
-
-        is_focused = (self.focused_input == element['key'])
-        border_color = self.colors['button_active'] if is_focused else self.colors['input_border']
-
-        # Hover effect
-        if not is_focused and self.is_point_in_rect(self.mouse_pos, input_rect):
-            border_color = tuple(min(255, c + 20) for c in border_color)
-
-        cv2.rectangle(canvas, (input_rect[0] + 2, input_rect[1] + 2), (input_rect[2] + 2, input_rect[3] + 2), self.colors['shadow'], -1)
-        cv2.rectangle(canvas, (input_rect[0], input_rect[1]), (input_rect[2], input_rect[3]), self.colors['input_bg'], -1)
-        cv2.rectangle(canvas, (input_rect[0], input_rect[1]), (input_rect[2], input_rect[3]), border_color, 2)
-
-        display_text = element.get('_input_text') if is_focused else value_text
-        if display_text is None:
-            display_text = value_text
-        display_text = str(display_text)
-        if is_focused and self.input_cursor_visible:
-            display_text += '|'
-
-        max_chars = int((input_w - 10) / 8)
-        if len(display_text) > max_chars:
-            display_text = display_text[-max_chars:]
-
-        text_x = input_x + 6
-        text_y = input_y + input_h - 8
-        cv2.putText(canvas, display_text, (text_x + 1, text_y + 1), cv2.FONT_HERSHEY_SIMPLEX, 0.5, self.colors['shadow'], 1)
-        cv2.putText(canvas, display_text, (text_x, text_y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, self.colors['text'], 1)
-    
-    def draw_modern_checkbox(self, canvas, element, y_start):
-        y = y_start + int(element.get('y', 0))
-        x = element['x']
-        value = element['value']
-        label = element['label']
-
-        # Checkbox
-        box_size = 20
-        box_x = x
-        box_y = y + 5
-        box_rect = (box_x, box_y, box_x + box_size, box_y + box_size)
-        element['_box_rect'] = box_rect
-
-        # Shadow
-        cv2.rectangle(canvas, (box_x + 1, box_y + 1), (box_x + box_size + 1, box_y + box_size + 1), self.colors['shadow'], -1)
-
-        # Background and border
-        if value:
-            bg_color = self.colors['checkbox_active']
-            border_color = self.colors['checkbox_active']
-        else:
-            bg_color = self.colors['checkbox_inactive']
-            border_color = self.colors['checkbox_inactive']
-
-        # Hover effect
-        if self.is_point_in_rect(self.mouse_pos, box_rect):
-            bg_color = tuple(min(255, c + 20) for c in bg_color)
-            border_color = tuple(min(255, c + 20) for c in border_color)
-
-        cv2.rectangle(canvas, (box_x, box_y), (box_x + box_size, box_y + box_size), bg_color, -1)
-        cv2.rectangle(canvas, (box_x, box_y), (box_x + box_size, box_y + box_size), border_color, 2)
-
-        # Checkmark
-        if value:
-            check_points = np.array([
-                [box_x + 4, box_y + 10],
-                [box_x + 8, box_y + 14],
-                [box_x + 16, box_y + 5]
-            ])
-            cv2.polylines(canvas, [check_points], False, (255, 255, 255), 2)
-
-        # Label
-        label_x = x + box_size + 10
-        cv2.putText(canvas, label, (label_x + 1, y + 21), cv2.FONT_HERSHEY_SIMPLEX, self.font_scale, self.colors['shadow'], 1)
-        cv2.putText(canvas, label, (label_x, y + 20), cv2.FONT_HERSHEY_SIMPLEX, self.font_scale, self.colors['text'], 1)
-    
-    def draw_modern_input(self, canvas, element, y_start):
-        y = y_start + int(element.get('y', 0))
-
-        x = element['x']
-        w = element['w']
-        h = element['h']
-        value = str(element['value'])
-        label = element['label']
-        label_x = element['label_x']
-
-        cv2.putText(canvas, label, (label_x + 1, y + 22), cv2.FONT_HERSHEY_SIMPLEX, self.font_scale, self.colors['shadow'], 1)
-        cv2.putText(canvas, label, (label_x, y + 21), cv2.FONT_HERSHEY_SIMPLEX, self.font_scale, self.colors['text'], 1)
-
-        input_x = x
-        input_y = y + 5
-        input_rect = (input_x, input_y, input_x + w, input_y + h)
-        element['_input_rect'] = input_rect
-
-        cv2.rectangle(canvas, (input_x + 2, input_y + 2), (input_x + w + 2, input_y + h + 2), self.colors['shadow'], -1)
-
-        is_focused = (self.focused_input == element['key'])
-        border_color = self.colors['button_active'] if is_focused else self.colors['input_border']
-
-        if not is_focused and self.is_point_in_rect(self.mouse_pos, input_rect):
-            border_color = tuple(min(255, c + 20) for c in border_color)
-
-        cv2.rectangle(canvas, (input_x, input_y), (input_x + w, input_y + h), self.colors['input_bg'], -1)
-        cv2.rectangle(canvas, (input_x, input_y), (input_x + w, input_y + h), border_color, 2)
-
-        display_value = value
-        if is_focused and self.input_cursor_visible:
-            display_value += '|'
-
-        max_chars = int((w - 10) / 8)
-        if len(display_value) > max_chars:
-            display_value = display_value[-max_chars:]
-
-        text_x = input_x + 8
-        text_y = input_y + h - 8
-
-        cv2.putText(canvas, display_value, (text_x + 1, text_y + 1), cv2.FONT_HERSHEY_SIMPLEX, 0.5, self.colors['shadow'], 1)
-        cv2.putText(canvas, display_value, (text_x, text_y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, self.colors['text'], 1)
-    
-    def draw_status_bar(self, canvas):
-        # Modern status bar
-        status_y = self.canvas_height - 30
-        cv2.rectangle(canvas, (0, status_y), (self.canvas_width, self.canvas_height), self.colors['border'], -1)
-        cv2.line(canvas, (0, status_y), (self.canvas_width, status_y), self.colors['text'], 1)
-        
-        # Status text
-        status_text = f'Tab: {self.tab_names[self.current_tab]} | F1: Toggle GUI | Use buttons for F2/F3/F4 actions'
-        cv2.putText(canvas, status_text, (10, status_y + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.4, self.colors['text'], 1)
-    
-    def draw_fps(self, canvas):
-        fps_text = f'FPS: {self.current_fps}'
-        text_size = cv2.getTextSize(fps_text, cv2.FONT_HERSHEY_SIMPLEX, 0.4, 1)[0]
-        cv2.putText(canvas, fps_text, (self.canvas_width - text_size[0] - 10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.4, self.colors['text'], 1)
-    
-    def is_point_in_rect(self, point, rect):
-        """Check if point is inside rectangle"""
-        x, y = point
-        x1, y1, x2, y2 = rect
-        return x1 <= x <= x2 and y1 <= y <= y2
-    
-    def mouse_callback(self, event, x, y, flags, param):
-        self.mouse_pos = (x, y)
-        self.mouse_moved = True
-        
-        if event == cv2.EVENT_LBUTTONDOWN:
-            self.handle_mouse_down(x, y)
-        elif event == cv2.EVENT_LBUTTONUP:
-            self.handle_mouse_up(x, y)
-        elif event == cv2.EVENT_MOUSEMOVE:
-            self.handle_mouse_move(x, y)
-    
-    def handle_mouse_down(self, x, y):
-        # Check physical buttons first
-        for button in self.buttons:
-            if self.is_point_in_rect((x, y), (button['x'], button['y'], button['x'] + button['w'], button['y'] + button['h'])):
-                self.button_states[button['id']]['pressed'] = True
-                self.needs_redraw = True
-                return
-
-        # Check tabs
-        for i, (tab_id, x1, y1, x2, y2) in enumerate(self.tab_rects):
-            if self.is_point_in_rect((x, y), (x1, y1, x2, y2)):
-                self.current_tab = tab_id
-                self.ui_elements = self.tab_elements[tab_id]
-                self.focused_input = None  # Clear focus when switching tabs
-                self.needs_redraw = True
-                return
-
-        # If an input is focused and we click outside it, commit the value
-        if self.focused_input is not None:
-            focused_element = None
-            for el in self.ui_elements:
-                if el['key'] == self.focused_input:
-                    focused_element = el
-                    break
-
-            if focused_element is not None:
-                focused_rect = focused_element.get('_input_rect')
-                if focused_rect and not self.is_point_in_rect((x, y), focused_rect):
-                    self.update_element_from_input(focused_element)
-                    self.focused_input = None
-
-        # Check UI elements
-        for element in self.ui_elements:
-            if element['type'] == 'slider':
-                if self.handle_slider_mouse_down(element, x, y):
-                    return
-            elif element['type'] == 'checkbox':
-                if self.handle_checkbox_click(element, x, y):
-                    return
-            elif element['type'] == 'input':
-                if self.handle_input_click(element, x, y):
-                    return
-
-        # Click outside: clear focus
-        if self.focused_input is not None:
-            focused_element = None
-            for el in self.ui_elements:
-                if el['key'] == self.focused_input:
-                    focused_element = el
-                    break
-            if focused_element is not None:
-                self.update_element_from_input(focused_element)
-            self.focused_input = None
-
-        self.needs_redraw = True
-    
-    def handle_mouse_up(self, x, y):
-        # Handle button clicks
-        for button in self.buttons:
-            button_id = button['id']
-            was_pressed = self.button_states[button_id]['pressed']
-
-            if self.is_point_in_rect((x, y), (button['x'], button['y'], button['x'] + button['w'], button['y'] + button['h'])):
-                if was_pressed:
-                    self.execute_button_action(button_id)
-
-            self.button_states[button_id]['pressed'] = False
-
-        # Finish slider drag
-        if self.dragging_slider_element is not None:
-            self.dragging_slider_element = None
-            self.dragging_slider = None
-            self.save_config()
-
-        self.needs_redraw = True
-    
-    def handle_mouse_move(self, x, y):
-        # Drag slider if active
-        if self.dragging_slider_element is not None:
-            self.update_slider_from_drag(self.dragging_slider_element, x)
-            self.needs_redraw = True
+    def on_save_clicked(self):
+        """Handle save button click with threading"""
+        if self.operation_in_progress:
             return
-
-        # Update button hover states
-        for button in self.buttons:
-            button_id = button['id']
-            was_hovered = self.button_states[button_id]['hovered']
-            is_hovered = self.is_point_in_rect((x, y), (button['x'], button['y'], button['x'] + button['w'], button['y'] + button['h']))
-
-            if was_hovered != is_hovered:
-                self.button_states[button_id]['hovered'] = is_hovered
-                self.needs_redraw = True
+        
+        thread = threading.Thread(target=self._save_worker, daemon=True)
+        thread.start()
     
-    def execute_button_action(self, button_id):
-        """Execute actions for physical buttons"""
+    def on_reload_clicked(self):
+        """Handle reload button click with threading"""
+        if self.operation_in_progress:
+            return
+        
+        thread = threading.Thread(target=self._reload_worker, daemon=True)
+        thread.start()
+    
+    def _save_worker(self):
+        """Worker thread for saving to prevent GUI freeze"""
+        self.operation_in_progress = True
         try:
-            if button_id == 'close_gui':
-                self.toggle_visibility()
-            elif button_id == 'exit_program':
-                logger.info('[Config GUI] Exit button pressed - closing program')
-                capture = None
-                try:
-                    from logic.capture import capture
-                except:
-                    pass
-                if capture:
-                    capture.Quit()
-                os._exit(0)
-            elif button_id == 'reload_config':
-                logger.info('[Config GUI] Reload button pressed - reloading config')
-                cfg.Read(verbose=True)
-                try:
-                    from logic.capture import capture
-                    capture.restart()
-                except:
-                    pass
-                try:
-                    from logic.mouse import mouse
-                    mouse.update_settings()
-                except:
-                    pass
-                try:
-                    from logic.hotkeys_watcher import hotkeys_watcher
-                    hotkeys_watcher.clss = self.active_classes()
-                except:
-                    pass
-                logger.info('[Config GUI] Config reload applied')
-            elif button_id == 'save_config':
-                logger.info('[Config GUI] Save button pressed - saving config')
-                self.save_config()
+            self.root.config(cursor="watch")
+            self.save_button.config(state='disabled')
+            self.reload_button.config(state='disabled')
+            
+            print("[SAVE] Starting save operation...")
+            self.save_all_changes()
+            print("[SAVE] Save operation completed")
+            
+            self.root.after(0, lambda: messagebox.showinfo("Success", "Changes saved and applied!"))
         except Exception as e:
-            logger.error(f'[Config GUI] Error executing button action {button_id}: {e}')
+            print(f"[ERROR] Save failed: {e}")
+            self.root.after(0, lambda: messagebox.showerror("Error", f"Save failed: {e}"))
+        finally:
+            self.root.after(0, lambda: self.root.config(cursor=""))
+            self.root.after(0, lambda: self.save_button.config(state='normal'))
+            self.root.after(0, lambda: self.reload_button.config(state='normal'))
+            self.operation_in_progress = False
     
-    def active_classes(self):
-        """Get active classes for detection"""
+    def _reload_worker(self):
+        """Worker thread for reloading to prevent GUI freeze"""
+        self.operation_in_progress = True
+        try:
+            self.root.config(cursor="watch")
+            self.save_button.config(state='disabled')
+            self.reload_button.config(state='disabled')
+            
+            print("[RELOAD] Starting reload operation...")
+            self.reload_from_file()
+            print("[RELOAD] Reload completed")
+            
+            self.root.after(0, lambda: messagebox.showinfo("Success", "Configuration reloaded from file!"))
+        except Exception as e:
+            print(f"[ERROR] Reload failed: {e}")
+            self.root.after(0, lambda: messagebox.showerror("Error", f"Reload failed: {e}"))
+        finally:
+            self.root.after(0, lambda: self.root.config(cursor=""))
+            self.root.after(0, lambda: self.save_button.config(state='normal'))
+            self.root.after(0, lambda: self.reload_button.config(state='normal'))
+            self.operation_in_progress = False
+    
+    def save_all_changes(self):
+        """Save all changes to config file and apply updates"""
+        config_file = 'config.ini'
+        if not os.path.exists(config_file):
+            print("[WARNING] config.ini not found, will create it")
+        
+        # Read current config
+        config = configparser.ConfigParser()
+        config.read(config_file)
+        
+        # Ensure all sections exist
+        sections = [
+            'Detection window', 'Capture Methods', 'Aim', 'Hotkeys', 'Mouse',
+            'Shooting', 'Arduino', 'AI', 'overlay', 'Debug window', 'Config GUI'
+        ]
+        for section in sections:
+            if not config.has_section(section):
+                config.add_section(section)
+        
+        # Save Detection window settings
+        config.set('Detection window', 'detection_window_width', str(self.text_vars['detection_window_width'].get()))
+        config.set('Detection window', 'detection_window_height', str(self.text_vars['detection_window_height'].get()))
+        config.set('Detection window', 'circle_capture', str(self.text_vars['circle_capture'].get()))
+        
+        # Save Capture Methods settings
+        config.set('Capture Methods', 'capture_fps', str(self.text_vars['capture_fps'].get()))
+        config.set('Capture Methods', 'Bettercam_capture', str(self.text_vars['Bettercam_capture'].get()))
+        config.set('Capture Methods', 'bettercam_monitor_id', str(self.text_vars['bettercam_monitor_id'].get()))
+        config.set('Capture Methods', 'bettercam_gpu_id', str(self.text_vars['bettercam_gpu_id'].get()))
+        config.set('Capture Methods', 'Obs_capture', str(self.text_vars['Obs_capture'].get()))
+        config.set('Capture Methods', 'Obs_camera_id', str(self.text_vars['Obs_camera_id'].get()))
+        config.set('Capture Methods', 'mss_capture', str(self.text_vars['mss_capture'].get()))
+        
+        # Save Aim settings
+        config.set('Aim', 'body_y_offset', str(self.text_vars['body_y_offset'].get()))
+        config.set('Aim', 'hideout_targets', str(self.text_vars['hideout_targets'].get()))
+        config.set('Aim', 'disable_headshot', str(self.text_vars['disable_headshot'].get()))
+        config.set('Aim', 'disable_prediction', str(self.text_vars['disable_prediction'].get()))
+        config.set('Aim', 'prediction_interval', str(self.text_vars['prediction_interval'].get()))
+        config.set('Aim', 'third_person', str(self.text_vars['third_person'].get()))
+        
+        # Save Hotkeys settings
+        config.set('Hotkeys', 'hotkey_targeting', str(self.text_vars['hotkey_targeting'].get()))
+        config.set('Hotkeys', 'hotkey_exit', str(self.text_vars['hotkey_exit'].get()))
+        config.set('Hotkeys', 'hotkey_pause', str(self.text_vars['hotkey_pause'].get()))
+        config.set('Hotkeys', 'hotkey_reload_config', str(self.text_vars.get('hotkey_reload_config', tk.StringVar(value='F4')).get()))
+        config.set('Hotkeys', 'hotkey_config_editor', str(self.text_vars.get('hotkey_config_editor', tk.StringVar(value='F1')).get()))
+        
+        # Save Mouse settings
+        config.set('Mouse', 'mouse_dpi', str(self.text_vars['mouse_dpi'].get()))
+        config.set('Mouse', 'mouse_sensitivity', str(self.text_vars['mouse_sensitivity'].get()))
+        config.set('Mouse', 'mouse_fov_width', str(self.text_vars['mouse_fov_width'].get()))
+        config.set('Mouse', 'mouse_fov_height', str(self.text_vars['mouse_fov_height'].get()))
+        config.set('Mouse', 'mouse_min_speed_multiplier', str(self.text_vars['mouse_min_speed_multiplier'].get()))
+        config.set('Mouse', 'mouse_max_speed_multiplier', str(self.text_vars['mouse_max_speed_multiplier'].get()))
+        config.set('Mouse', 'mouse_lock_target', str(self.text_vars['mouse_lock_target'].get()))
+        config.set('Mouse', 'mouse_auto_aim', str(self.text_vars['mouse_auto_aim'].get()))
+        config.set('Mouse', 'mouse_ghub', str(self.text_vars['mouse_ghub'].get()))
+        config.set('Mouse', 'mouse_rzr', str(self.text_vars['mouse_rzr'].get()))
+        
+        # Save Shooting settings
+        config.set('Shooting', 'auto_shoot', str(self.text_vars['auto_shoot'].get()))
+        config.set('Shooting', 'triggerbot', str(self.text_vars['triggerbot'].get()))
+        config.set('Shooting', 'force_click', str(self.text_vars['force_click'].get()))
+        config.set('Shooting', 'bScope_multiplier', str(self.text_vars['bScope_multiplier'].get()))
+        
+        # Save Arduino settings
+        config.set('Arduino', 'arduino_move', str(self.text_vars['arduino_move'].get()))
+        config.set('Arduino', 'arduino_shoot', str(self.text_vars['arduino_shoot'].get()))
+        config.set('Arduino', 'arduino_port', str(self.text_vars['arduino_port'].get()))
+        config.set('Arduino', 'arduino_baudrate', str(self.text_vars['arduino_baudrate'].get()))
+        config.set('Arduino', 'arduino_16_bit_mouse', str(self.text_vars['arduino_16_bit_mouse'].get()))
+        
+        # Save AI settings
+        config.set('AI', 'AI_model_name', str(self.text_vars['AI_model_name'].get()))
+        config.set('AI', 'AI_model_image_size', str(self.text_vars['AI_model_image_size'].get()))
+        config.set('AI', 'AI_conf', str(self.text_vars['AI_conf'].get()))
+        config.set('AI', 'AI_device', str(self.text_vars['AI_device'].get()))
+        config.set('AI', 'AI_enable_AMD', str(self.text_vars['AI_enable_AMD'].get()))
+        config.set('AI', 'disable_tracker', str(self.text_vars['disable_tracker'].get()))
+        
+        # Save Overlay settings
+        config.set('overlay', 'show_overlay', str(self.text_vars['show_overlay'].get()))
+        config.set('overlay', 'overlay_show_borders', str(self.text_vars['overlay_show_borders'].get()))
+        config.set('overlay', 'overlay_show_boxes', str(self.text_vars['overlay_show_boxes'].get()))
+        config.set('overlay', 'overlay_show_target_line', str(self.text_vars['overlay_show_target_line'].get()))
+        config.set('overlay', 'overlay_show_target_prediction_line', str(self.text_vars['overlay_show_target_prediction_line'].get()))
+        config.set('overlay', 'overlay_show_labels', str(self.text_vars['overlay_show_labels'].get()))
+        config.set('overlay', 'overlay_show_conf', str(self.text_vars['overlay_show_conf'].get()))
+        
+        # Save Debug window settings
+        config.set('Debug window', 'show_window', str(self.text_vars['show_window'].get()))
+        config.set('Debug window', 'show_detection_speed', str(self.text_vars['show_detection_speed'].get()))
+        config.set('Debug window', 'show_window_fps', str(self.text_vars['show_window_fps'].get()))
+        config.set('Debug window', 'show_boxes', str(self.text_vars['show_boxes'].get()))
+        config.set('Debug window', 'show_labels', str(self.text_vars['show_labels'].get()))
+        config.set('Debug window', 'show_conf', str(self.text_vars['show_conf'].get()))
+        config.set('Debug window', 'show_target_line', str(self.text_vars['show_target_line'].get()))
+        config.set('Debug window', 'show_target_prediction_line', str(self.text_vars['show_target_prediction_line'].get()))
+        config.set('Debug window', 'show_bScope_box', str(self.text_vars['show_bscope_box'].get()))
+        config.set('Debug window', 'show_history_points', str(self.text_vars['show_history_points'].get()))
+        config.set('Debug window', 'debug_window_always_on_top', str(self.text_vars['debug_window_always_on_top'].get()))
+        config.set('Debug window', 'spawn_window_pos_x', str(self.text_vars['spawn_window_pos_x'].get()))
+        config.set('Debug window', 'spawn_window_pos_y', str(self.text_vars['spawn_window_pos_y'].get()))
+        config.set('Debug window', 'debug_window_scale_percent', str(self.text_vars['debug_window_scale_percent'].get()))
+        config.set('Debug window', 'debug_window_screenshot_key', str(self.text_vars['debug_window_screenshot_key'].get()))
+        
+        # Save Config GUI settings
+        config.set('Config GUI', 'config_gui_enabled', str(self.text_vars['config_gui_enabled'].get()))
+        config.set('Config GUI', 'config_gui_pos_x', str(self.text_vars['config_gui_pos_x'].get()))
+        config.set('Config GUI', 'config_gui_pos_y', str(self.text_vars['config_gui_pos_y'].get()))
+        config.set('Config GUI', 'hotkey_toggle_config_editor', str(self.text_vars['hotkey_toggle_config_editor'].get()))
+        
+        # Write to file
+        with open('config.ini', 'w') as f:
+            config.write(f)
+        print("[SAVE] Configuration written to config.ini")
+        
+        # Reload runtime config and apply
+        self.reload_runtime_config()
+    
+    def reload_from_file(self):
+        """Reload all values from config file and update GUI"""
+        print("[RELOAD] Loading values from config.ini...")
+        self.cfg.Read()
+        self.update_all_widgets()
+        self.reload_runtime_config()
+    
+    def reload_runtime_config(self):
+        """Reload runtime components"""
+        print("[RELOAD] Applying runtime configuration...")
+        
+        try:
+            self.cfg.Read()
+            print("[RELOAD] Config reloaded")
+        except Exception as e:
+            print(f"[ERROR] Failed to reload cfg: {e}")
+        
+        # Reload capture
+        try:
+            if self.capture and hasattr(self.capture, 'restart'):
+                print("[RELOAD] Restarting capture...")
+                self.capture.restart()
+                print("[RELOAD] Capture restarted")
+        except Exception as e:
+            print(f"[ERROR] Failed to restart capture: {e}")
+        
+        # Update mouse
+        try:
+            if self.mouse and hasattr(self.mouse, 'update_settings'):
+                print("[RELOAD] Updating mouse settings...")
+                self.mouse.update_settings()
+                print("[RELOAD] Mouse settings updated")
+        except Exception as e:
+            print(f"[ERROR] Failed to update mouse settings: {e}")
+        
+        # Update active classes
+        try:
+            if self.hotkeys_watcher and hasattr(self.hotkeys_watcher, 'clss'):
+                print("[RELOAD] Updating active classes...")
+                self.hotkeys_watcher.clss = self._get_active_classes(self.cfg)
+                print(f"[RELOAD] Active classes: {self.hotkeys_watcher.clss}")
+        except Exception as e:
+            print(f"[ERROR] Failed to update active classes: {e}")
+        
+        # Update visuals
+        try:
+            if self.visual and hasattr(self.visual, 'start_if_not_running'):
+                if self.cfg.show_overlay or self.cfg.show_window:
+                    print("[RELOAD] Starting visuals...")
+                    self.visual.start_if_not_running()
+                    print("[RELOAD] Visuals thread started")
+        except Exception as e:
+            print(f"[ERROR] Failed to start visuals: {e}")
+        
+        print("[RELOAD] Runtime reload complete")
+    
+    def _get_active_classes(self, cfg):
+        """Get active detection classes from config"""
         clss = [0.0, 1.0]
         
-        if cfg.hideout_targets:
+        if hasattr(cfg, 'hideout_targets') and cfg.hideout_targets:
             clss.extend([5.0, 6.0])
-
-        if not cfg.disable_headshot:
+        
+        if hasattr(cfg, 'disable_headshot') and not cfg.disable_headshot:
             clss.append(7.0)
             
-        if cfg.third_person:
+        if hasattr(cfg, 'third_person') and cfg.third_person:
             clss.append(10.0)
         
         return clss
     
-    def handle_slider_mouse_down(self, element, x, y):
-        """Handle mouse down on slider (handle or input box)."""
-        # Check input box first
-        input_rect = element.get('_input_rect')
-        if not input_rect:
-            y_start = self.tab_bar_height + 25
-            ey = y_start + int(element.get('y', 0))
-            input_w = 70
-            input_h = 25
-            input_x = element['x'] + element['w'] + 60
-            input_y = ey + 10
-            input_rect = (input_x, input_y, input_x + input_w, input_y + input_h)
-
-        if self.is_point_in_rect((x, y), input_rect):
-            self.focused_input = element['key']
-            # Start editing with current value
-            if element.get('is_int', False):
-                element['_input_text'] = str(int(round(float(element.get('value', 0)))))
-            else:
-                element['_input_text'] = f"{float(element.get('value', 0)):.4f}".rstrip('0').rstrip('.')
-            self.needs_redraw = True
-            return True
-
-        # Check track/handle
-        track_rect = element.get('_track_rect')
-        if not track_rect:
-            y_start = self.tab_bar_height + 25
-            ey = y_start + int(element.get('y', 0))
-            track_y = ey + 25
-            track_rect = (element['x'], track_y, element['x'] + element['w'], track_y + 6)
-
-        if self.is_point_in_rect((x, y), (track_rect[0], track_rect[1] - 10, track_rect[2], track_rect[3] + 10)):
-            # Start dragging
-            self.dragging_slider = element['key']
-            self.dragging_slider_element = element
-            self.update_slider_from_drag(element, x)
-            self.needs_redraw = True
-            return True
-
-        return False
-
-    def update_slider_from_drag(self, element, x):
-        """Update slider value from drag position."""
-        slider_x = element['x']
-        slider_w = element['w']
-        min_val = element['min']
-        max_val = element['max']
-        range_val = max_val - min_val
-
-        if range_val <= 0:
-            return
-
-        # Calculate ratio from mouse position
-        ratio = (x - slider_x) / slider_w
-        ratio = max(0.0, min(1.0, ratio))
-        new_value = min_val + ratio * range_val
-
-        # Apply increment snapping
-        increment = element.get('increment', 1)
-        if increment:
-            # Snap to increment
-            new_value = round(new_value / increment) * increment
-
-        # Clamp to range
-        new_value = max(min_val, min(max_val, new_value))
-
-        if element.get('is_int', False):
-            new_value = int(round(new_value))
-
-        element['value'] = new_value
-        self.apply_element_value(element['key'], new_value)
-
-    def handle_checkbox_click(self, element, x, y):
-        """Handle checkbox click - toggle value and save immediately."""
-        box_rect = element.get('_box_rect')
-        if not box_rect:
-            # Fallback if no rect stored yet
-            checkbox_x = element['x']
-            checkbox_y = element.get('y', 0) + self.tab_bar_height + 25 + 5
-            checkbox_size = 20
-            box_rect = (checkbox_x, checkbox_y, checkbox_x + checkbox_size, checkbox_y + checkbox_size)
-
-        if self.is_point_in_rect((x, y), box_rect):
-            # Toggle value
-            element['value'] = not element['value']
-            self.apply_element_value(element['key'], element['value'])
-            # Immediately save to config.ini
-            self.save_config()
-            self.needs_redraw = True
-            return True
-
-        return False
-
-    def handle_input_click(self, element, x, y):
-        """Handle input box click."""
-        input_rect = element.get('_input_rect')
-        if not input_rect:
-            # Fallback
-            input_x = element['x']
-            input_y = element.get('y', 0) + self.tab_bar_height + 25 + 5
-            input_w = element['w']
-            input_h = element['h']
-            input_rect = (input_x, input_y, input_x + input_w, input_y + input_h)
-
-        if self.is_point_in_rect((x, y), input_rect):
-            self.focused_input = element['key']
-            self.needs_redraw = True
-            return True
-
-        return False
-    
-    def handle_keyboard(self, key):
-        if self.focused_input is None:
-            return
-
-        # Find the focused element
-        focused_element = None
-        for element in self.ui_elements:
-            if element['key'] == self.focused_input:
-                focused_element = element
-                break
-
-        if focused_element is None:
-            return
-
-        # For sliders, use _input_text; for regular inputs, use value
-        if focused_element['type'] == 'slider':
-            current_value = str(focused_element.get('_input_text', ''))
-        else:
-            current_value = str(focused_element['value'])
-
-        if key == 8:  # Backspace
-            if current_value:
-                current_value = current_value[:-1]
-        elif key == 13:  # Enter
-            self.focused_input = None
-            self.update_element_from_input(focused_element)
-            return
-        elif 32 <= key <= 126:  # Printable ASCII
-            # For numeric inputs, allow numbers, decimal points, and minus sign
-            char = chr(key)
-            if focused_element['type'] == 'slider' or focused_element.get('is_int', False):
-                if char.isdigit() or char in '.-':
-                    current_value += char
-            else:
-                if len(current_value) < focused_element.get('max_len', 20):
-                    current_value += char
-        elif key == 27:  # Escape
-            self.focused_input = None
-            if focused_element['type'] == 'slider':
-                focused_element['_input_text'] = ''
-            return
-
-        # Update the appropriate field
-        if focused_element['type'] == 'slider':
-            focused_element['_input_text'] = current_value
-        else:
-            focused_element['value'] = current_value
-
-        self.needs_redraw = True
-    
-    def update_element_from_input(self, element):
-        """Update element value from input text."""
+    def update_all_widgets(self):
+        """Update all widget values from config"""
+        print("[UPDATE] Updating all widgets...")
+        current_tab = self.notebook.select()
+        
         try:
-            key = element['key']
-
-            # For sliders, use _input_text if available
-            if element['type'] == 'slider':
-                value_str = str(element.get('_input_text', element['value']))
-            else:
-                value_str = str(element['value'])
-
-            # Parse the value
-            if element.get('is_int', False) or element['type'] == 'slider':
-                try:
-                    new_value = float(value_str)
-                    if element.get('is_int', False):
-                        new_value = int(round(new_value))
-                except (ValueError, TypeError):
-                    # Invalid input, keep old value
-                    logger.warning(f'[Config GUI] Invalid numeric input for {key}: {value_str}')
-                    if element['type'] == 'slider':
-                        element['_input_text'] = ''
-                    return
-            else:
-                new_value = value_str
-
-            # For sliders, clamp to range and apply increment
-            if element['type'] == 'slider':
-                min_val = element['min']
-                max_val = element['max']
-                new_value = max(min_val, min(max_val, new_value))
-                
-                increment = element.get('increment', 1)
-                if increment:
-                    new_value = round(new_value / increment) * increment
-
-                if element.get('is_int', False):
-                    new_value = int(round(new_value))
-
-                element['_input_text'] = ''  # Clear input text
-
-            element['value'] = new_value
-            self.apply_element_value(key, new_value)
-            self.save_config()  # Save after manual input
-        except Exception as e:
-            logger.error(f'[Config GUI] Error updating element {element["key"]}: {e}')
-    
-    def apply_element_value(self, key, value):
-        """Apply value change to config"""
-        try:
-            if hasattr(cfg, key):
-                setattr(cfg, key, value)
-                self.needs_redraw = True
-        except Exception as e:
-            logger.error(f'[Config GUI] Error applying value to {key}: {e}')
-    
-    def sync_elements_from_cfg(self):
-        """Sync UI elements from config."""
-        for element in self.ui_elements:
-            key = element['key']
-
-            # Don't overwrite text while the user is typing.
-            if self.focused_input == key and element.get('type') == 'input':
-                continue
-
-            if hasattr(cfg, key):
-                element['value'] = getattr(cfg, key)
-    
-    def save_config(self):
-        """Save all current config values to config.ini"""
-        try:
-            with cfg_file_lock:
-                config = configparser.ConfigParser()
-                config.read('config.ini')
-                
-                # Define key mappings for different config sections
-                detection_keys = ['detection_window_width', 'detection_window_height', 'circle_capture']
-                capture_keys = ['capture_fps', 'Bettercam_capture', 'bettercam_monitor_id', 'bettercam_gpu_id', 'Obs_capture', 'Obs_camera_id', 'mss_capture']
-                aim_keys = ['body_y_offset', 'hideout_targets', 'disable_headshot', 'disable_prediction', 'prediction_interval', 'third_person']
-                hotkey_keys = ['hotkey_targeting', 'hotkey_exit', 'hotkey_pause', 'hotkey_reload_config']
-                mouse_keys = ['mouse_dpi', 'mouse_sensitivity', 'mouse_fov_width', 'mouse_fov_height', 'mouse_min_speed_multiplier', 'mouse_max_speed_multiplier', 'mouse_lock_target', 'mouse_auto_aim', 'mouse_ghub', 'mouse_rzr']
-                shooting_keys = ['auto_shoot', 'triggerbot', 'force_click', 'bScope_multiplier']
-                arduino_keys = ['arduino_move', 'arduino_shoot', 'arduino_port', 'arduino_baudrate', 'arduino_16_bit_mouse']
-                ai_keys = ['AI_model_name', 'AI_model_image_size', 'AI_conf', 'AI_device', 'AI_enable_AMD', 'disable_tracker']
-                overlay_keys = ['show_overlay', 'overlay_show_borders', 'overlay_show_boxes', 'overlay_show_target_line', 'overlay_show_target_prediction_line', 'overlay_show_labels', 'overlay_show_conf']
-                debug_keys = ['show_window', 'show_detection_speed', 'show_window_fps', 'show_boxes', 'show_labels', 'show_conf', 'show_target_line', 'show_target_prediction_line', 'show_bScope_box', 'show_history_points', 'debug_window_always_on_top', 'spawn_window_pos_x', 'spawn_window_pos_y', 'debug_window_scale_percent', 'debug_window_screenshot_key']
-                
-                # Save each section
-                for key in detection_keys:
-                    if hasattr(cfg, key):
-                        val = getattr(cfg, key)
-                        if isinstance(val, bool):
-                            config.set('Detection window', key, 'True' if val else 'False')
-                        else:
-                            config.set('Detection window', key, str(val))
-                
-                for key in capture_keys:
-                    if hasattr(cfg, key):
-                        val = getattr(cfg, key)
-                        if isinstance(val, bool):
-                            config.set('Capture Methods', key, 'True' if val else 'False')
-                        else:
-                            config.set('Capture Methods', key, str(val))
-                
-                for key in aim_keys:
-                    if hasattr(cfg, key):
-                        val = getattr(cfg, key)
-                        if isinstance(val, bool):
-                            config.set('Aim', key, 'True' if val else 'False')
-                        else:
-                            config.set('Aim', key, str(val))
-                
-                for key in hotkey_keys:
-                    if hasattr(cfg, key):
-                        val = getattr(cfg, key)
-                        config.set('Hotkeys', key, str(val))
-                
-                for key in mouse_keys:
-                    if hasattr(cfg, key):
-                        val = getattr(cfg, key)
-                        if isinstance(val, bool):
-                            config.set('Mouse', key, 'True' if val else 'False')
-                        else:
-                            config.set('Mouse', key, str(val))
-                
-                for key in shooting_keys:
-                    if hasattr(cfg, key):
-                        val = getattr(cfg, key)
-                        if isinstance(val, bool):
-                            config.set('Shooting', key, 'True' if val else 'False')
-                        else:
-                            config.set('Shooting', key, str(val))
-                
-                for key in arduino_keys:
-                    if hasattr(cfg, key):
-                        val = getattr(cfg, key)
-                        if isinstance(val, bool):
-                            config.set('Arduino', key, 'True' if val else 'False')
-                        else:
-                            config.set('Arduino', key, str(val))
-                
-                for key in ai_keys:
-                    if hasattr(cfg, key):
-                        val = getattr(cfg, key)
-                        if isinstance(val, bool):
-                            config.set('AI', key, 'True' if val else 'False')
-                        else:
-                            config.set('AI', key, str(val))
-                
-                for key in overlay_keys:
-                    if hasattr(cfg, key):
-                        val = getattr(cfg, key)
-                        if isinstance(val, bool):
-                            if key.startswith('show_overlay') or key.startswith('overlay'):
-                                config.set('overlay', key, 'True' if val else 'False')
-                            else:
-                                config.set('Debug window', key, 'True' if val else 'False')
-                        else:
-                            config.set('Debug window', key, str(val))
-                
-                for key in debug_keys:
-                    if hasattr(cfg, key):
-                        val = getattr(cfg, key)
-                        if isinstance(val, bool):
-                            config.set('Debug window', key, 'True' if val else 'False')
-                        else:
-                            config.set('Debug window', key, str(val))
-
-                with open('config.ini', 'w', encoding='utf-8') as f:
-                    config.write(f)
-
-            cfg.Read(verbose=False)
-            self.apply_runtime_updates()
-            self.sync_elements_from_cfg()
-
-            logger.info('[Config GUI] Config saved & applied')
-        except Exception as e:
-            logger.error(f'[Config GUI] Error saving config: {e}')
-    
-    def apply_runtime_updates(self):
-        """Apply runtime updates after config save"""
-        try:
-            # Import required modules
-            from logic.capture import capture
-            from logic.mouse import mouse
-            from logic.visual import visuals
-            from logic.hotkeys_watcher import hotkeys_watcher
+            # Detection Window
+            self.text_vars['detection_window_width'].set(self.cfg.detection_window_width)
+            self.text_vars['detection_window_height'].set(self.cfg.detection_window_height)
+            self.text_vars['circle_capture'].set(self.cfg.circle_capture)
             
-            # Restart capture to pick up window size changes
-            capture.restart()
+            # Capture Methods
+            self.text_vars['capture_fps'].set(self.cfg.capture_fps)
+            self.text_vars['Bettercam_capture'].set(self.cfg.Bettercam_capture)
+            self.text_vars['bettercam_monitor_id'].set(self.cfg.bettercam_monitor_id)
+            self.text_vars['bettercam_gpu_id'].set(self.cfg.bettercam_gpu_id)
+            self.text_vars['Obs_capture'].set(self.cfg.Obs_capture)
+            self.text_vars['Obs_camera_id'].set(self.cfg.Obs_camera_id)
+            self.text_vars['mss_capture'].set(self.cfg.mss_capture)
             
-            # Update mouse settings to pick up sensitivity, DPI, FOV changes
-            mouse.update_settings()
+            # Aim
+            self.text_vars['body_y_offset'].set(self.cfg.body_y_offset)
+            self.text_vars['hideout_targets'].set(self.cfg.hideout_targets)
+            self.text_vars['disable_headshot'].set(self.cfg.disable_headshot)
+            self.text_vars['disable_prediction'].set(self.cfg.disable_prediction)
+            self.text_vars['prediction_interval'].set(self.cfg.prediction_interval)
+            self.text_vars['third_person'].set(self.cfg.third_person)
             
-            # Start visuals thread if overlay or window is enabled and it's not running
-            if cfg.show_overlay or cfg.show_window:
-                visuals.start_if_not_running()
+            # Hotkeys
+            self.text_vars['hotkey_targeting'].set(self.cfg.hotkey_targeting)
+            self.text_vars['hotkey_exit'].set(self.cfg.hotkey_exit)
+            self.text_vars['hotkey_pause'].set(self.cfg.hotkey_pause)
+            self.text_vars['hotkey_reload_config'].set(getattr(self.cfg, 'hotkey_reload_config', 'F4'))
+            self.text_vars['hotkey_config_editor'].set(getattr(self.cfg, 'hotkey_toggle_config_editor', 'F1'))
             
-            # Update active classes in hotkeys_watcher
-            hotkeys_watcher.clss = self.active_classes()
+            # Mouse
+            self.text_vars['mouse_dpi'].set(self.cfg.mouse_dpi)
+            self.text_vars['mouse_sensitivity'].set(self.cfg.mouse_sensitivity)
+            self.text_vars['mouse_fov_width'].set(self.cfg.mouse_fov_width)
+            self.text_vars['mouse_fov_height'].set(self.cfg.mouse_fov_height)
+            self.text_vars['mouse_min_speed_multiplier'].set(self.cfg.mouse_min_speed_multiplier)
+            self.text_vars['mouse_max_speed_multiplier'].set(self.cfg.mouse_max_speed_multiplier)
+            self.text_vars['mouse_lock_target'].set(self.cfg.mouse_lock_target)
+            self.text_vars['mouse_auto_aim'].set(self.cfg.mouse_auto_aim)
+            self.text_vars['mouse_ghub'].set(self.cfg.mouse_ghub)
+            self.text_vars['mouse_rzr'].set(self.cfg.mouse_rzr)
             
-            logger.info('[Config GUI] Runtime updates applied (capture/mouse/visuals/classes)')
+            # Shooting
+            self.text_vars['auto_shoot'].set(self.cfg.auto_shoot)
+            self.text_vars['triggerbot'].set(self.cfg.triggerbot)
+            self.text_vars['force_click'].set(self.cfg.force_click)
+            self.text_vars['bScope_multiplier'].set(self.cfg.bScope_multiplier)
+            
+            # Arduino
+            self.text_vars['arduino_move'].set(self.cfg.arduino_move)
+            self.text_vars['arduino_shoot'].set(self.cfg.arduino_shoot)
+            self.text_vars['arduino_port'].set(self.cfg.arduino_port)
+            self.text_vars['arduino_baudrate'].set(self.cfg.arduino_baudrate)
+            self.text_vars['arduino_16_bit_mouse'].set(self.cfg.arduino_16_bit_mouse)
+            
+            # AI
+            self.text_vars['AI_model_name'].set(self.cfg.AI_model_name)
+            self.text_vars['AI_model_image_size'].set(self.cfg.ai_model_image_size)
+            self.text_vars['AI_conf'].set(self.cfg.AI_conf)
+            self.text_vars['AI_device'].set(self.cfg.AI_device)
+            self.text_vars['AI_enable_AMD'].set(self.cfg.AI_enable_AMD)
+            self.text_vars['disable_tracker'].set(self.cfg.disable_tracker)
+            
+            # Overlay
+            self.text_vars['show_overlay'].set(self.cfg.show_overlay)
+            self.text_vars['overlay_show_borders'].set(self.cfg.overlay_show_borders)
+            self.text_vars['overlay_show_boxes'].set(self.cfg.overlay_show_boxes)
+            self.text_vars['overlay_show_target_line'].set(self.cfg.overlay_show_target_line)
+            self.text_vars['overlay_show_target_prediction_line'].set(self.cfg.overlay_show_target_prediction_line)
+            self.text_vars['overlay_show_labels'].set(self.cfg.overlay_show_labels)
+            self.text_vars['overlay_show_conf'].set(self.cfg.overlay_show_conf)
+            
+            # Debug Window
+            self.text_vars['show_window'].set(self.cfg.show_window)
+            self.text_vars['show_detection_speed'].set(self.cfg.show_detection_speed)
+            self.text_vars['show_window_fps'].set(self.cfg.show_window_fps)
+            self.text_vars['show_boxes'].set(self.cfg.show_boxes)
+            self.text_vars['show_labels'].set(self.cfg.show_labels)
+            self.text_vars['show_conf'].set(self.cfg.show_conf)
+            self.text_vars['show_target_line'].set(self.cfg.show_target_line)
+            self.text_vars['show_target_prediction_line'].set(self.cfg.show_target_prediction_line)
+            self.text_vars['show_bscope_box'].set(getattr(self.cfg, 'show_bScope_box', False))
+            self.text_vars['show_history_points'].set(self.cfg.show_history_points)
+            self.text_vars['debug_window_always_on_top'].set(self.cfg.debug_window_always_on_top)
+            self.text_vars['spawn_window_pos_x'].set(self.cfg.spawn_window_pos_x)
+            self.text_vars['spawn_window_pos_y'].set(self.cfg.spawn_window_pos_y)
+            self.text_vars['debug_window_scale_percent'].set(self.cfg.debug_window_scale_percent)
+            self.text_vars['debug_window_screenshot_key'].set(self.cfg.debug_window_screenshot_key)
+            
+            # Config GUI
+            self.text_vars['config_gui_enabled'].set(True)
+            self.text_vars['config_gui_pos_x'].set(400)
+            self.text_vars['config_gui_pos_y'].set(100)
+            self.text_vars['hotkey_toggle_config_editor'].set('F1')
             
         except Exception as e:
-            logger.error(f'[Config GUI] Error applying runtime updates: {e}')
+            print(f"[WARNING] Error updating widgets: {e}")
+        
+        # Restore tab selection
+        if current_tab in self.notebook.tabs():
+            self.notebook.select(current_tab)
+        
+        print("[UPDATE] Widgets update complete")
     
-    def save_position(self):
-        try:
-            x, y = self.window_pos
-            with cfg_file_lock:
-                config = configparser.ConfigParser()
-                config.read('config.ini')
-                
-                if not config.has_section('Config GUI'):
-                    config.add_section('Config GUI')
-                
-                config.set('Config GUI', 'config_gui_pos_x', str(x))
-                config.set('Config GUI', 'config_gui_pos_y', str(y))
-                
-                with open('config.ini', 'w', encoding='utf-8') as f:
-                    config.write(f)
-        except Exception as e:
-            logger.error(f'[Config GUI] Error saving position: {e}')
+    # Tab creation methods
+    def create_detection_tab(self):
+        """Create Detection Window tab"""
+        frame = ttk.Frame(self.notebook)
+        self.notebook.add(frame, text="Detection Window")
+        
+        outer_frame = ttk.Frame(frame)
+        outer_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        self.add_slider(outer_frame, "Window Width", "detection_window_width", 200, 1920, 10)
+        self.add_slider(outer_frame, "Window Height", "detection_window_height", 200, 1080, 10)
+        self.add_checkbox(outer_frame, "Circle Capture", "circle_capture")
     
-    def cleanup(self):
-        try:
-            self.save_position()
-            if self.window is not None:
-                cv2.destroyWindow(self.window_name)
-        except Exception as e:
-            logger.error(f'[Config GUI] Error during cleanup: {e}')
+    def create_capture_tab(self):
+        """Create Capture Methods tab"""
+        frame = ttk.Frame(self.notebook)
+        self.notebook.add(frame, text="Capture Methods")
+        
+        outer_frame = ttk.Frame(frame)
+        outer_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        self.add_checkbox(outer_frame, "Enable Bettercam", "Bettercam_capture")
+        self.add_text_entry(outer_frame, "Bettercam Monitor ID", "bettercam_monitor_id")
+        self.add_text_entry(outer_frame, "Bettercam GPU ID", "bettercam_gpu_id")
+        self.add_separator(outer_frame)
+        self.add_checkbox(outer_frame, "Enable OBS Capture", "Obs_capture")
+        self.add_text_entry(outer_frame, "OBS Camera ID", "Obs_camera_id")
+        self.add_separator(outer_frame)
+        self.add_checkbox(outer_frame, "Enable MSS Capture", "mss_capture")
+        self.add_slider(outer_frame, "Capture FPS", "capture_fps", 30, 120, 1)
     
-    def toggle_visibility(self):
-        self.visible = not self.visible
-        if self.visible:
-            cv2.imshow(self.window_name, np.zeros((100, 100, 3), dtype=np.uint8))
-            cv2.setMouseCallback(self.window_name, self.mouse_callback)
-        else:
-            try:
-                cv2.destroyWindow(self.window_name)
-            except:
-                pass
+    def create_aim_tab(self):
+        """Create Aim Settings tab"""
+        frame = ttk.Frame(self.notebook)
+        self.notebook.add(frame, text="Aim")
+        
+        outer_frame = ttk.Frame(frame)
+        outer_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        self.add_slider(outer_frame, "Body Y Offset", "body_y_offset", 0.0, 0.5, 0.01)
+        self.add_checkbox(outer_frame, "Hideout Targets", "hideout_targets")
+        self.add_checkbox(outer_frame, "Disable Headshot", "disable_headshot")
+        self.add_checkbox(outer_frame, "Disable Prediction", "disable_prediction")
+        self.add_slider(outer_frame, "Prediction Interval", "prediction_interval", 0.5, 5.0, 0.1)
+        self.add_checkbox(outer_frame, "Third Person", "third_person")
+    
+    def create_hotkeys_tab(self):
+        """Create Hotkeys tab"""
+        frame = ttk.Frame(self.notebook)
+        self.notebook.add(frame, text="Hotkeys")
+        
+        outer_frame = ttk.Frame(frame)
+        outer_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        self.add_text_entry(outer_frame, "Targeting", "hotkey_targeting")
+        self.add_text_entry(outer_frame, "Exit", "hotkey_exit")
+        self.add_text_entry(outer_frame, "Pause", "hotkey_pause")
+        self.add_text_entry(outer_frame, "Reload Config", "hotkey_reload_config")
+        self.add_text_entry(outer_frame, "Config Editor", "hotkey_config_editor")
+    
+    def create_mouse_tab(self):
+        """Create Mouse Settings tab"""
+        frame = ttk.Frame(self.notebook)
+        self.notebook.add(frame, text="Mouse")
+        
+        outer_frame = ttk.Frame(frame)
+        outer_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        self.add_text_entry(outer_frame, "DPI", "mouse_dpi")
+        self.add_slider(outer_frame, "Sensitivity", "mouse_sensitivity", 0.5, 10.0, 0.1)
+        self.add_slider(outer_frame, "FOV Width", "mouse_fov_width", 20, 200, 5)
+        self.add_slider(outer_frame, "FOV Height", "mouse_fov_height", 20, 200, 5)
+        self.add_slider(outer_frame, "Min Speed Multiplier", "mouse_min_speed_multiplier", 0.5, 3.0, 0.1)
+        self.add_slider(outer_frame, "Max Speed Multiplier", "mouse_max_speed_multiplier", 0.5, 3.0, 0.1)
+        self.add_checkbox(outer_frame, "Lock Target", "mouse_lock_target")
+        self.add_checkbox(outer_frame, "Auto Aim", "mouse_auto_aim")
+        self.add_separator(outer_frame)
+        self.add_checkbox(outer_frame, "GHub Mode", "mouse_ghub")
+        self.add_checkbox(outer_frame, "Razer Mode", "mouse_rzr")
+    
+    def create_arduino_tab(self):
+        """Create Arduino tab"""
+        frame = ttk.Frame(self.notebook)
+        self.notebook.add(frame, text="Arduino")
+        
+        outer_frame = ttk.Frame(frame)
+        outer_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        self.add_checkbox(outer_frame, "Move", "arduino_move")
+        self.add_checkbox(outer_frame, "Shoot", "arduino_shoot")
+        self.add_text_entry(outer_frame, "Port", "arduino_port")
+        self.add_text_entry(outer_frame, "Baudrate", "arduino_baudrate")
+        self.add_checkbox(outer_frame, "16-bit Mouse", "arduino_16_bit_mouse")
+    
+    def create_shooting_tab(self):
+        """Create Shooting tab"""
+        frame = ttk.Frame(self.notebook)
+        self.notebook.add(frame, text="Shooting")
+        
+        outer_frame = ttk.Frame(frame)
+        outer_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        self.add_checkbox(outer_frame, "Auto Shoot", "auto_shoot")
+        self.add_checkbox(outer_frame, "Triggerbot", "triggerbot")
+        self.add_checkbox(outer_frame, "Force Click", "force_click")
+        self.add_slider(outer_frame, "Scope Multiplier", "bScope_multiplier", 0.5, 3.0, 0.1)
+    
+    def create_ai_tab(self):
+        """Create AI Settings tab"""
+        frame = ttk.Frame(self.notebook)
+        self.notebook.add(frame, text="AI")
+        
+        outer_frame = ttk.Frame(frame)
+        outer_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        self.add_text_entry(outer_frame, "Model Name", "AI_model_name")
+        self.add_text_entry(outer_frame, "Model Image Size", "AI_model_image_size")
+        self.add_slider(outer_frame, "Confidence Threshold", "AI_conf", 0.1, 0.9, 0.05)
+        self.add_text_entry(outer_frame, "Device", "AI_device")
+        self.add_checkbox(outer_frame, "Enable AMD", "AI_enable_AMD")
+        self.add_checkbox(outer_frame, "Disable Tracker", "disable_tracker")
+    
+    def create_overlay_tab(self):
+        """Create Overlay tab"""
+        frame = ttk.Frame(self.notebook)
+        self.notebook.add(frame, text="Overlay")
+        
+        outer_frame = ttk.Frame(frame)
+        outer_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        self.add_checkbox(outer_frame, "Show Overlay", "show_overlay")
+        self.add_separator(outer_frame)
+        self.add_checkbox(outer_frame, "Show Borders", "overlay_show_borders")
+        self.add_checkbox(outer_frame, "Show Boxes", "overlay_show_boxes")
+        self.add_checkbox(outer_frame, "Show Target Line", "overlay_show_target_line")
+        self.add_checkbox(outer_frame, "Show Prediction Line", "overlay_show_target_prediction_line")
+        self.add_checkbox(outer_frame, "Show Labels", "overlay_show_labels")
+        self.add_checkbox(outer_frame, "Show Confidence", "overlay_show_conf")
+    
+    def create_debug_tab(self):
+        """Create Debug Window tab"""
+        frame = ttk.Frame(self.notebook)
+        self.notebook.add(frame, text="Debug")
+        
+        outer_frame = ttk.Frame(frame)
+        outer_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        self.add_checkbox(outer_frame, "Show Window", "show_window")
+        self.add_separator(outer_frame)
+        self.add_checkbox(outer_frame, "Show Detection Speed", "show_detection_speed")
+        self.add_checkbox(outer_frame, "Show Window FPS", "show_window_fps")
+        self.add_checkbox(outer_frame, "Show Boxes", "show_boxes")
+        self.add_checkbox(outer_frame, "Show Labels", "show_labels")
+        self.add_checkbox(outer_frame, "Show Confidence", "show_conf")
+        self.add_checkbox(outer_frame, "Show Target Line", "show_target_line")
+        self.add_checkbox(outer_frame, "Show Prediction Line", "show_target_prediction_line")
+        self.add_checkbox(outer_frame, "Show BScope Box", "show_bscope_box")
+        self.add_checkbox(outer_frame, "Show History", "show_history_points")
+        self.add_separator(outer_frame)
+        self.add_checkbox(outer_frame, "Always On Top", "debug_window_always_on_top")
+        self.add_text_entry(outer_frame, "Window X Position", "spawn_window_pos_x")
+        self.add_text_entry(outer_frame, "Window Y Position", "spawn_window_pos_y")
+        self.add_slider(outer_frame, "Window Scale (%)", "debug_window_scale_percent", 50, 200, 10)
+        self.add_text_entry(outer_frame, "Screenshot Key", "debug_window_screenshot_key")
+    
+    # Widget helper methods
+    def add_slider(self, parent, label_text, var_name, min_val, max_val, step):
+        """Add a slider widget"""
+        row = parent.grid_size()[1]
+        
+        frame = ttk.Frame(parent)
+        frame.grid(row=row, column=0, columnspan=2, sticky=(tk.W, tk.E), padx=5, pady=3)
+        
+        ttk.Label(frame, text=label_text, width=20).pack(side=tk.LEFT, padx=(0, 10))
+        
+        var = tk.DoubleVar() if isinstance(min_val, float) else tk.IntVar()
+        self.text_vars[var_name] = var
+        
+        slider = ttk.Scale(frame, from_=min_val, to=max_val, variable=var, length=200)
+        slider.pack(side=tk.LEFT)
+        
+        value_label = ttk.Label(frame, textvariable=var, width=8)
+        value_label.pack(side=tk.LEFT, padx=(10, 0))
+    
+    def add_checkbox(self, parent, label_text, var_name):
+        """Add a checkbox widget"""
+        row = parent.grid_size()[1]
+        
+        var = tk.BooleanVar()
+        self.text_vars[var_name] = var
+        
+        cb = ttk.Checkbutton(parent, text=label_text, variable=var)
+        cb.grid(row=row, column=0, columnspan=2, sticky=tk.W, padx=5, pady=2)
+    
+    def add_text_entry(self, parent, label_text, var_name):
+        """Add a text entry widget"""
+        row = parent.grid_size()[1]
+        
+        frame = ttk.Frame(parent)
+        frame.grid(row=row, column=0, columnspan=2, sticky=(tk.W, tk.E), padx=5, pady=3)
+        
+        ttk.Label(frame, text=label_text, width=15).pack(side=tk.LEFT)
+        
+        var = tk.StringVar()
+        self.text_vars[var_name] = var
+        
+        entry = ttk.Entry(frame, textvariable=var, width=25)
+        entry.pack(side=tk.LEFT, padx=10)
+    
+    def add_separator(self, parent):
+        """Add a separator"""
+        sep = ttk.Separator(parent, orient=tk.HORIZONTAL)
+        sep.grid(row=parent.grid_size()[1], column=0, columnspan=2, sticky=(tk.W, tk.E), pady=8)
+    
+    def show(self):
+        """Show the GUI"""
+        self.root.mainloop()
+    
+    def close(self):
+        """Close the GUI"""
+        if hasattr(self, 'root'):
+            self.root.quit()
 
+# Import threading here to avoid circular imports
+import threading
 
-def launch_config_gui():
-    """Launch the config GUI in a new thread (callable from hotkeys_watcher)."""
-    return ConfigEditor()
+def create_config_gui(config, hotkeys_watcher=None, mouse=None, capture=None, visual=None):
+    """Convenience function to create and run the config GUI"""
+    gui = ConfigGUI(config, hotkeys_watcher, mouse, capture, visual)
+    return gui
+
+if __name__ == "__main__":
+    import sys
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from helper import cfg
+    
+    gui = ConfigGUI(cfg, None, None, None, None)
+    gui.show()
