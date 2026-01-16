@@ -780,7 +780,11 @@ class ConfigEditor(threading.Thread):
                     mouse.update_settings()
                 except:
                     pass
-                self.clss = self.active_classes()
+                try:
+                    from logic.hotkeys_watcher import hotkeys_watcher
+                    hotkeys_watcher.clss = self.active_classes()
+                except:
+                    pass
                 logger.info('[Config GUI] Config reload applied')
             elif button_id == 'save_config':
                 logger.info('[Config GUI] Save button pressed - saving config')
@@ -1150,19 +1154,22 @@ class ConfigEditor(threading.Thread):
             from logic.capture import capture
             from logic.mouse import mouse
             from logic.visual import visuals
+            from logic.hotkeys_watcher import hotkeys_watcher
             
-            # Restart capture
+            # Restart capture to pick up window size changes
             capture.restart()
             
-            # Update mouse settings
+            # Update mouse settings to pick up sensitivity, DPI, FOV changes
             mouse.update_settings()
             
             # Start visuals thread if overlay or window is enabled and it's not running
             if cfg.show_overlay or cfg.show_window:
                 visuals.start_if_not_running()
             
-            # Update active classes
-            self.clss = self.active_classes()
+            # Update active classes in hotkeys_watcher
+            hotkeys_watcher.clss = self.active_classes()
+            
+            logger.info('[Config GUI] Runtime updates applied (capture/mouse/visuals/classes)')
             
         except Exception as e:
             logger.error(f'[Config GUI] Error applying runtime updates: {e}')
