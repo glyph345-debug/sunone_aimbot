@@ -5,6 +5,8 @@ import sys
 import time
 import configparser
 import platform
+import threading
+import queue
 
 class DebouncedButton:
     """Button wrapper with debouncing built-in"""
@@ -44,6 +46,8 @@ class ConfigGUI:
         # Operation state flags
         self.operation_in_progress = False
         
+        self.text_vars = {}
+        
         # Create main window if not provided
         if root is None:
             self.root = tk.Tk()
@@ -58,6 +62,14 @@ class ConfigGUI:
         """Setup main window properties"""
         self.root.title("Configuration Editor")
         self.root.geometry("850x700")
+
+        try:
+            pos_x = int(getattr(self.cfg, 'config_gui_pos_x', 400))
+            pos_y = int(getattr(self.cfg, 'config_gui_pos_y', 100))
+            self.root.geometry(f"850x700+{pos_x}+{pos_y}")
+        except Exception:
+            pass
+
         self.root.resizable(True, True)
         
         try:
@@ -86,6 +98,7 @@ class ConfigGUI:
         self.create_ai_tab()
         self.create_overlay_tab()
         self.create_debug_tab()
+        self.create_config_gui_tab()
         
         # Save/Reload buttons
         button_frame = ttk.Frame(main_frame)
@@ -210,8 +223,7 @@ class ConfigGUI:
         config.set('Hotkeys', 'hotkey_targeting', str(self.text_vars['hotkey_targeting'].get()))
         config.set('Hotkeys', 'hotkey_exit', str(self.text_vars['hotkey_exit'].get()))
         config.set('Hotkeys', 'hotkey_pause', str(self.text_vars['hotkey_pause'].get()))
-        config.set('Hotkeys', 'hotkey_reload_config', str(self.text_vars.get('hotkey_reload_config', tk.StringVar(value='F4')).get()))
-        config.set('Hotkeys', 'hotkey_config_editor', str(self.text_vars.get('hotkey_config_editor', tk.StringVar(value='F1')).get()))
+        config.set('Hotkeys', 'hotkey_reload_config', str(self.text_vars['hotkey_reload_config'].get()))
         
         # Save Mouse settings
         config.set('Mouse', 'mouse_dpi', str(self.text_vars['mouse_dpi'].get()))
@@ -390,7 +402,6 @@ class ConfigGUI:
             self.text_vars['hotkey_exit'].set(self.cfg.hotkey_exit)
             self.text_vars['hotkey_pause'].set(self.cfg.hotkey_pause)
             self.text_vars['hotkey_reload_config'].set(getattr(self.cfg, 'hotkey_reload_config', 'F4'))
-            self.text_vars['hotkey_config_editor'].set(getattr(self.cfg, 'hotkey_toggle_config_editor', 'F1'))
             
             # Mouse
             self.text_vars['mouse_dpi'].set(self.cfg.mouse_dpi)
@@ -452,10 +463,10 @@ class ConfigGUI:
             self.text_vars['debug_window_screenshot_key'].set(self.cfg.debug_window_screenshot_key)
             
             # Config GUI
-            self.text_vars['config_gui_enabled'].set(True)
-            self.text_vars['config_gui_pos_x'].set(400)
-            self.text_vars['config_gui_pos_y'].set(100)
-            self.text_vars['hotkey_toggle_config_editor'].set('F1')
+            self.text_vars['config_gui_enabled'].set(getattr(self.cfg, 'config_gui_enabled', True))
+            self.text_vars['config_gui_pos_x'].set(getattr(self.cfg, 'config_gui_pos_x', 400))
+            self.text_vars['config_gui_pos_y'].set(getattr(self.cfg, 'config_gui_pos_y', 100))
+            self.text_vars['hotkey_toggle_config_editor'].set(getattr(self.cfg, 'hotkey_toggle_config_editor', 'F1'))
             
         except Exception as e:
             print(f"[WARNING] Error updating widgets: {e}")
@@ -524,7 +535,6 @@ class ConfigGUI:
         self.add_text_entry(outer_frame, "Exit", "hotkey_exit")
         self.add_text_entry(outer_frame, "Pause", "hotkey_pause")
         self.add_text_entry(outer_frame, "Reload Config", "hotkey_reload_config")
-        self.add_text_entry(outer_frame, "Config Editor", "hotkey_config_editor")
     
     def create_mouse_tab(self):
         """Create Mouse Settings tab"""
@@ -630,6 +640,19 @@ class ConfigGUI:
         self.add_text_entry(outer_frame, "Window Y Position", "spawn_window_pos_y")
         self.add_slider(outer_frame, "Window Scale (%)", "debug_window_scale_percent", 50, 200, 10)
         self.add_text_entry(outer_frame, "Screenshot Key", "debug_window_screenshot_key")
+
+    def create_config_gui_tab(self):
+        """Create Config GUI tab"""
+        frame = ttk.Frame(self.notebook)
+        self.notebook.add(frame, text="Config GUI")
+
+        outer_frame = ttk.Frame(frame)
+        outer_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        self.add_checkbox(outer_frame, "Enable Config GUI", "config_gui_enabled")
+        self.add_text_entry(outer_frame, "GUI X Position", "config_gui_pos_x")
+        self.add_text_entry(outer_frame, "GUI Y Position", "config_gui_pos_y")
+        self.add_text_entry(outer_frame, "Toggle Hotkey", "hotkey_toggle_config_editor")
     
     # Widget helper methods
     def add_slider(self, parent, label_text, var_name, min_val, max_val, step):
@@ -689,13 +712,84 @@ class ConfigGUI:
         if hasattr(self, 'root'):
             self.root.quit()
 
-# Import threading here to avoid circular imports
-import threading
-
 def create_config_gui(config, hotkeys_watcher=None, mouse=None, capture=None, visual=None):
     """Convenience function to create and run the config GUI"""
     gui = ConfigGUI(config, hotkeys_watcher, mouse, capture, visual)
     return gui
+
+
+class ConfigGUIThread(threading.Thread):
+    def __init__(self, config, hotkeys_watcher=None, mouse=None, capture=None, visual=None):
+        super().__init__(daemon=True, name="ConfigGUIThread")
+        self.cfg = config
+        self.hotkeys_watcher = hotkeys_watcher
+        self.mouse = mouse
+        self.capture = capture
+        self.visual = visual
+
+        self.gui = None
+        self._commands = queue.Queue()
+
+    def run(self):
+        self.gui = ConfigGUI(self.cfg, self.hotkeys_watcher, self.mouse, self.capture, self.visual)
+
+        def on_close():
+            self.hide()
+
+        self.gui.root.protocol("WM_DELETE_WINDOW", on_close)
+        self.gui.root.after(100, self._process_commands)
+        self.gui.show()
+
+    def _process_commands(self):
+        if not self.gui or not hasattr(self.gui, 'root'):
+            return
+
+        try:
+            while True:
+                cmd = self._commands.get_nowait()
+                if cmd == "toggle":
+                    if self.gui.root.state() == "withdrawn":
+                        self.gui.root.deiconify()
+                    else:
+                        self.gui.root.withdraw()
+                elif cmd == "show":
+                    self.gui.root.deiconify()
+                elif cmd == "hide":
+                    self.gui.root.withdraw()
+        except queue.Empty:
+            pass
+
+        try:
+            self.gui.root.after(100, self._process_commands)
+        except Exception:
+            pass
+
+    def toggle_visibility(self):
+        self._commands.put("toggle")
+
+    def show_window(self):
+        self._commands.put("show")
+
+    def hide(self):
+        self._commands.put("hide")
+
+
+def launch_config_gui():
+    """Launch the config editor GUI in a background thread."""
+    from logic.config_watcher import cfg
+    from logic.capture import capture
+    from logic.mouse import mouse
+    from logic.visual import visuals
+
+    try:
+        from logic.hotkeys_watcher import hotkeys_watcher
+    except Exception:
+        hotkeys_watcher = None
+
+    gui_thread = ConfigGUIThread(cfg, hotkeys_watcher=hotkeys_watcher, mouse=mouse, capture=capture, visual=visuals)
+    gui_thread.start()
+    return gui_thread
+
 
 if __name__ == "__main__":
     import sys
