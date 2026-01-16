@@ -127,12 +127,22 @@ class ConfigGUI:
         thread.start()
     
     def on_reload_clicked(self):
-        """Handle reload button click with threading"""
+        """Handle reload button click with threading - closes GUI for fresh launch"""
         if self.operation_in_progress:
             return
-        
-        thread = threading.Thread(target=self._reload_worker, daemon=True)
-        thread.start()
+
+        # Show confirmation dialog
+        confirm = messagebox.askyesno(
+            "Confirm Reload",
+            "This will close the configuration editor and reload config.ini.\n\n"
+            "All changes from the config file will be applied.\n\n"
+            "Press F1 to reopen the GUI with the updated configuration.\n\n"
+            "Continue?"
+        )
+
+        if confirm:
+            thread = threading.Thread(target=self._reload_worker, daemon=True)
+            thread.start()
     
     def _save_worker(self):
         """Worker thread for saving to prevent GUI freeze"""
@@ -157,25 +167,67 @@ class ConfigGUI:
             self.operation_in_progress = False
     
     def _reload_worker(self):
-        """Worker thread for reloading to prevent GUI freeze"""
+        """Worker thread for reloading - closes GUI and clears instance for fresh launch"""
         self.operation_in_progress = True
         try:
             self.root.config(cursor="watch")
             self.save_button.config(state='disabled')
             self.reload_button.config(state='disabled')
-            
-            print("[RELOAD] Starting reload operation...")
-            self.reload_from_file()
-            print("[RELOAD] Reload completed")
-            
-            self.root.after(0, lambda: messagebox.showinfo("Success", "Configuration reloaded from file!"))
+
+            print("[RELOAD] Reloading config from file and closing GUI...")
+
+            # Reload config from file to get latest values
+            try:
+                print("[RELOAD] Reading config.ini...")
+                self.cfg.Read(verbose=True)
+                print("[RELOAD] Config reloaded from file")
+            except Exception as e:
+                print(f"[WARNING] Failed to reload config: {e}")
+
+            # Save current window position to config
+            try:
+                pos_x = self.root.winfo_x()
+                pos_y = self.root.winfo_y()
+                print(f"[RELOAD] Saving window position: ({pos_x}, {pos_y})")
+
+                # Update config file with position
+                import configparser
+                config = configparser.ConfigParser()
+                config.read('config.ini')
+
+                if not config.has_section('Config GUI'):
+                    config.add_section('Config GUI')
+
+                config.set('Config GUI', 'config_gui_pos_x', str(pos_x))
+                config.set('Config GUI', 'config_gui_pos_y', str(pos_y))
+
+                with open('config.ini', 'w') as f:
+                    config.write(f)
+                print("[RELOAD] Window position saved to config.ini")
+            except Exception as e:
+                print(f"[WARNING] Failed to save window position: {e}")
+
+            # Clear the global instance reference so a fresh one can be created
+            try:
+                from logic.hotkeys_watcher import clear_config_gui_instance
+                clear_config_gui_instance()
+                print("[RELOAD] Config GUI instance cleared")
+            except Exception as e:
+                print(f"[WARNING] Failed to clear config GUI instance: {e}")
+
+            # Destroy the GUI window
+            print("[RELOAD] Destroying GUI window...")
+            self.root.after(0, lambda: self.root.destroy())
+            print("[RELOAD] GUI closed successfully")
+
         except Exception as e:
             print(f"[ERROR] Reload failed: {e}")
-            self.root.after(0, lambda: messagebox.showerror("Error", f"Reload failed: {e}"))
+            # If something fails, still try to destroy the window
+            try:
+                self.root.after(0, lambda: self.root.destroy())
+            except:
+                pass
         finally:
-            self.root.after(0, lambda: self.root.config(cursor=""))
-            self.root.after(0, lambda: self.save_button.config(state='normal'))
-            self.root.after(0, lambda: self.reload_button.config(state='normal'))
             self.operation_in_progress = False
     
     def save_all_changes(self):
