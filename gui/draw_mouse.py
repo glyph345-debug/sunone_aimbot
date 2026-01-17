@@ -1,64 +1,18 @@
-import imgui
-
+import PySimpleGUI as sg
 
 def draw_mouse(cfg):
-    """Draw mouse movement settings section"""
-    
-    # Mouse DPI
-    changed, value = imgui.slider_int("Mouse DPI", cfg.mouse_dpi, 100, 20000)
-    if changed:
-        cfg.mouse_dpi = value
-        cfg.save()
-    
-    # Mouse sensitivity
-    changed, value = imgui.slider_float("Mouse Sensitivity", cfg.mouse_sensitivity, 0.1, 10.0)
-    if changed:
-        cfg.mouse_sensitivity = value
-        cfg.save()
-    
-    # FOV width
-    changed, value = imgui.slider_int("FOV Width", cfg.mouse_fov_width, 10, 500)
-    if changed:
-        cfg.mouse_fov_width = value
-        cfg.save()
-    
-    # FOV height
-    changed, value = imgui.slider_int("FOV Height", cfg.mouse_fov_height, 10, 500)
-    if changed:
-        cfg.mouse_fov_height = value
-        cfg.save()
-    
-    # Speed multipliers
-    changed, value = imgui.slider_float("Min Speed Multiplier", cfg.mouse_min_speed_multiplier, 0.1, 5.0)
-    if changed:
-        cfg.mouse_min_speed_multiplier = value
-        cfg.save()
-    
-    changed, value = imgui.slider_float("Max Speed Multiplier", cfg.mouse_max_speed_multiplier, 0.1, 5.0)
-    if changed:
-        cfg.mouse_max_speed_multiplier = value
-        cfg.save()
-    
-    # Lock target
-    changed, value = imgui.checkbox("Lock Target", cfg.mouse_lock_target)
-    if changed:
-        cfg.mouse_lock_target = value
-        cfg.save()
-    
-    # Auto aim
-    changed, value = imgui.checkbox("Auto Aim", cfg.mouse_auto_aim)
-    if changed:
-        cfg.mouse_auto_aim = value
-        cfg.save()
-    
-    # G HUB
-    changed, value = imgui.checkbox("G HUB Support", cfg.mouse_ghub)
-    if changed:
-        cfg.mouse_ghub = value
-        cfg.save()
-    
-    # Razer
-    changed, value = imgui.checkbox("Razer Support", cfg.mouse_rzr)
-    if changed:
-        cfg.mouse_rzr = value
-        cfg.save()
+    """Returns PySimpleGUI layout for mouse settings"""
+    layout = [
+        [sg.Text("Mouse Settings", font=("Arial", 12, "bold"))],
+        [sg.Text("Mouse DPI:"), sg.Slider(range=(100, 20000), default_value=cfg.mouse_dpi, orientation='h', key='-MOUSE_DPI-', enable_events=True)],
+        [sg.Text("Mouse Sensitivity:"), sg.Slider(range=(0.1, 10.0), resolution=0.1, default_value=cfg.mouse_sensitivity, orientation='h', key='-MOUSE_SENSITIVITY-', enable_events=True)],
+        [sg.Text("FOV Width:"), sg.Slider(range=(10, 500), default_value=cfg.mouse_fov_width, orientation='h', key='-MOUSE_FOV_WIDTH-', enable_events=True)],
+        [sg.Text("FOV Height:"), sg.Slider(range=(10, 500), default_value=cfg.mouse_fov_height, orientation='h', key='-MOUSE_FOV_HEIGHT-', enable_events=True)],
+        [sg.Text("Min Speed Multiplier:"), sg.Slider(range=(0.1, 5.0), resolution=0.1, default_value=cfg.mouse_min_speed_multiplier, orientation='h', key='-MOUSE_MIN_SPEED_MULTIPLIER-', enable_events=True)],
+        [sg.Text("Max Speed Multiplier:"), sg.Slider(range=(0.1, 5.0), resolution=0.1, default_value=cfg.mouse_max_speed_multiplier, orientation='h', key='-MOUSE_MAX_SPEED_MULTIPLIER-', enable_events=True)],
+        [sg.Checkbox("Lock Target", default=cfg.mouse_lock_target, key='-MOUSE_LOCK_TARGET-', enable_events=True)],
+        [sg.Checkbox("Auto Aim", default=cfg.mouse_auto_aim, key='-MOUSE_AUTO_AIM-', enable_events=True)],
+        [sg.Checkbox("G HUB Support", default=cfg.mouse_ghub, key='-MOUSE_GHUB-', enable_events=True)],
+        [sg.Checkbox("Razer Support", default=cfg.mouse_rzr, key='-MOUSE_RZR-', enable_events=True)],
+    ]
+    return layout

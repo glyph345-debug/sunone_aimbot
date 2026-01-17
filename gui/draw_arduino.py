@@ -1,39 +1,13 @@
-import imgui
-
+import PySimpleGUI as sg
 
 def draw_arduino(cfg):
-    """Draw Arduino settings section"""
-    
-    # Arduino move
-    changed, value = imgui.checkbox("Arduino Move", cfg.arduino_move)
-    if changed:
-        cfg.arduino_move = value
-        cfg.save()
-    
-    # Arduino shoot
-    changed, value = imgui.checkbox("Arduino Shoot", cfg.arduino_shoot)
-    if changed:
-        cfg.arduino_shoot = value
-        cfg.save()
-    
-    # Arduino port
-    imgui.text("Arduino Port:")
-    imgui.same_line()
-    imgui.push_item_width(200)
-    changed, value = imgui.input_text("##arduino_port", cfg.arduino_port, 50)
-    imgui.pop_item_width()
-    if changed:
-        cfg.arduino_port = value
-        cfg.save()
-    
-    # Arduino baudrate
-    changed, value = imgui.slider_int("Arduino Baudrate", cfg.arduino_baudrate, 1200, 115200)
-    if changed:
-        cfg.arduino_baudrate = value
-        cfg.save()
-    
-    # Arduino 16-bit mouse
-    changed, value = imgui.checkbox("Arduino 16-bit Mouse", cfg.arduino_16_bit_mouse)
-    if changed:
-        cfg.arduino_16_bit_mouse = value
-        cfg.save()
+    """Returns PySimpleGUI layout for Arduino settings"""
+    layout = [
+        [sg.Text("Arduino Settings", font=("Arial", 12, "bold"))],
+        [sg.Checkbox("Arduino Move", default=cfg.arduino_move, key='-ARDUINO_MOVE-', enable_events=True)],
+        [sg.Checkbox("Arduino Shoot", default=cfg.arduino_shoot, key='-ARDUINO_SHOOT-', enable_events=True)],
+        [sg.Text("Arduino Port:"), sg.Input(cfg.arduino_port, key='-ARDUINO_PORT-', enable_events=True)],
+        [sg.Text("Arduino Baudrate:"), sg.Slider(range=(1200, 115200), default_value=cfg.arduino_baudrate, orientation='h', key='-ARDUINO_BAUDRATE-', enable_events=True)],
+        [sg.Checkbox("Arduino 16-bit Mouse", default=cfg.arduino_16_bit_mouse, key='-ARDUINO_16_BIT_MOUSE-', enable_events=True)],
+    ]
+    return layout

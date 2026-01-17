@@ -1,68 +1,23 @@
-import imgui
-
+import PySimpleGUI as sg
 
 def draw_capture(cfg):
-    """Draw capture settings section"""
-    
-    # Capture FPS
-    changed, value = imgui.slider_int("Capture FPS", cfg.capture_fps, 1, 240)
-    if changed:
-        cfg.capture_fps = value
-        cfg.save()
-    
-    # Bettercam capture
-    changed, value = imgui.checkbox("Bettercam Capture", cfg.Bettercam_capture)
-    if changed:
-        cfg.Bettercam_capture = value
-        cfg.save()
-    
-    if cfg.Bettercam_capture:
-        changed, value = imgui.slider_int("Monitor ID", cfg.bettercam_monitor_id, 0, 10)
-        if changed:
-            cfg.bettercam_monitor_id = value
-            cfg.save()
+    """Returns PySimpleGUI layout for capture settings"""
+    layout = [
+        [sg.Text("Capture Settings", font=("Arial", 12, "bold"))],
+        [sg.Text("Capture FPS:"), sg.Slider(range=(1, 240), default_value=cfg.capture_fps, orientation='h', key='-CAPTURE_FPS-', enable_events=True)],
         
-        changed, value = imgui.slider_int("GPU ID", cfg.bettercam_gpu_id, 0, 10)
-        if changed:
-            cfg.bettercam_gpu_id = value
-            cfg.save()
-    
-    # OBS capture
-    changed, value = imgui.checkbox("OBS Capture", cfg.Obs_capture)
-    if changed:
-        cfg.Obs_capture = value
-        cfg.save()
-    
-    if cfg.Obs_capture:
-        imgui.text("OBS Camera ID:")
-        imgui.same_line()
-        imgui.push_item_width(200)
-        changed, value = imgui.input_text("##obs_camera_id", cfg.Obs_camera_id, 10)
-        imgui.pop_item_width()
-        if changed:
-            cfg.Obs_camera_id = value
-            cfg.save()
-    
-    # MSS capture
-    changed, value = imgui.checkbox("MSS Capture", cfg.mss_capture)
-    if changed:
-        cfg.mss_capture = value
-        cfg.save()
-    
-    # Circle capture
-    imgui.separator()
-    changed, value = imgui.checkbox("Circle Capture", cfg.circle_capture)
-    if changed:
-        cfg.circle_capture = value
-        cfg.save()
-    
-    # Detection window size
-    changed, value = imgui.slider_int("Detection Width", cfg.detection_window_width, 320, 1920)
-    if changed:
-        cfg.detection_window_width = value
-        cfg.save()
-    
-    changed, value = imgui.slider_int("Detection Height", cfg.detection_window_height, 320, 1080)
-    if changed:
-        cfg.detection_window_height = value
-        cfg.save()
+        [sg.Checkbox("Bettercam Capture", default=cfg.Bettercam_capture, key='-BETTERCAM_CAPTURE-', enable_events=True)],
+        [sg.Text("  Monitor ID:"), sg.Slider(range=(0, 10), default_value=cfg.bettercam_monitor_id, orientation='h', key='-BETTERCAM_MONITOR_ID-', enable_events=True)],
+        [sg.Text("  GPU ID:"), sg.Slider(range=(0, 10), default_value=cfg.bettercam_gpu_id, orientation='h', key='-BETTERCAM_GPU_ID-', enable_events=True)],
+        
+        [sg.Checkbox("OBS Capture", default=cfg.Obs_capture, key='-OBS_CAPTURE-', enable_events=True)],
+        [sg.Text("  OBS Camera ID:"), sg.Input(cfg.Obs_camera_id, key='-OBS_CAMERA_ID-', enable_events=True)],
+        
+        [sg.Checkbox("MSS Capture", default=cfg.mss_capture, key='-MSS_CAPTURE-', enable_events=True)],
+        
+        [sg.Separator()],
+        [sg.Checkbox("Circle Capture", default=cfg.circle_capture, key='-CIRCLE_CAPTURE-', enable_events=True)],
+        [sg.Text("Detection Width:"), sg.Slider(range=(320, 1920), default_value=cfg.detection_window_width, orientation='h', key='-DETECTION_WINDOW_WIDTH-', enable_events=True)],
+        [sg.Text("Detection Height:"), sg.Slider(range=(320, 1080), default_value=cfg.detection_window_height, orientation='h', key='-DETECTION_WINDOW_HEIGHT-', enable_events=True)],
+    ]
+    return layout

@@ -1,98 +1,23 @@
-import imgui
-
+import PySimpleGUI as sg
 
 def draw_debug(cfg):
-    """Draw debug window settings section"""
-    
-    # Show debug window
-    changed, value = imgui.checkbox("Show Debug Window", cfg.show_window)
-    if changed:
-        cfg.show_window = value
-        cfg.save()
-    
-    # Show detection speed
-    changed, value = imgui.checkbox("Show Detection Speed", cfg.show_detection_speed)
-    if changed:
-        cfg.show_detection_speed = value
-        cfg.save()
-    
-    # Show window FPS
-    changed, value = imgui.checkbox("Show Window FPS", cfg.show_window_fps)
-    if changed:
-        cfg.show_window_fps = value
-        cfg.save()
-    
-    # Show boxes
-    changed, value = imgui.checkbox("Show Boxes", cfg.show_boxes)
-    if changed:
-        cfg.show_boxes = value
-        cfg.save()
-    
-    # Show labels
-    changed, value = imgui.checkbox("Show Labels", cfg.show_labels)
-    if changed:
-        cfg.show_labels = value
-        cfg.save()
-    
-    # Show confidence
-    changed, value = imgui.checkbox("Show Confidence", cfg.show_conf)
-    if changed:
-        cfg.show_conf = value
-        cfg.save()
-    
-    # Show target line
-    changed, value = imgui.checkbox("Show Target Line", cfg.show_target_line)
-    if changed:
-        cfg.show_target_line = value
-        cfg.save()
-    
-    # Show target prediction line
-    changed, value = imgui.checkbox("Show Target Prediction Line", cfg.show_target_prediction_line)
-    if changed:
-        cfg.show_target_prediction_line = value
-        cfg.save()
-    
-    # Show bScope box
-    changed, value = imgui.checkbox("Show bScope Box", cfg.show_bScope_box)
-    if changed:
-        cfg.show_bScope_box = value
-        cfg.save()
-    
-    # Show history points
-    changed, value = imgui.checkbox("Show History Points", cfg.show_history_points)
-    if changed:
-        cfg.show_history_points = value
-        cfg.save()
-    
-    # Debug window always on top
-    changed, value = imgui.checkbox("Always On Top", cfg.debug_window_always_on_top)
-    if changed:
-        cfg.debug_window_always_on_top = value
-        cfg.save()
-    
-    # Window position
-    changed, value = imgui.slider_int("Window Position X", cfg.spawn_window_pos_x, 0, 3840)
-    if changed:
-        cfg.spawn_window_pos_x = value
-        cfg.save()
-    
-    changed, value = imgui.slider_int("Window Position Y", cfg.spawn_window_pos_y, 0, 2160)
-    if changed:
-        cfg.spawn_window_pos_y = value
-        cfg.save()
-    
-    # Window scale
-    changed, value = imgui.slider_int("Window Scale Percent", cfg.debug_window_scale_percent, 50, 200)
-    if changed:
-        cfg.debug_window_scale_percent = value
-        cfg.save()
-    
-    # Screenshot key
-    imgui.text("Screenshot Key:")
-    imgui.same_line()
-    imgui.push_item_width(200)
-    changed, value = imgui.input_text("##screenshot_key", cfg.debug_window_screenshot_key, 20)
-    imgui.pop_item_width()
-    if changed:
-        cfg.debug_window_screenshot_key = value
-        cfg.save()
+    """Returns PySimpleGUI layout for debug settings"""
+    layout = [
+        [sg.Text("Debug Settings", font=("Arial", 12, "bold"))],
+        [sg.Checkbox("Show Debug Window", default=cfg.show_window, key='-SHOW_WINDOW-', enable_events=True)],
+        [sg.Checkbox("Show Detection Speed", default=cfg.show_detection_speed, key='-SHOW_DETECTION_SPEED-', enable_events=True)],
+        [sg.Checkbox("Show Window FPS", default=cfg.show_window_fps, key='-SHOW_WINDOW_FPS-', enable_events=True)],
+        [sg.Checkbox("Show Boxes", default=cfg.show_boxes, key='-SHOW_BOXES-', enable_events=True)],
+        [sg.Checkbox("Show Labels", default=cfg.show_labels, key='-SHOW_LABELS-', enable_events=True)],
+        [sg.Checkbox("Show Confidence", default=cfg.show_conf, key='-SHOW_CONF-', enable_events=True)],
+        [sg.Checkbox("Show Target Line", default=cfg.show_target_line, key='-SHOW_TARGET_LINE-', enable_events=True)],
+        [sg.Checkbox("Show Target Prediction Line", default=cfg.show_target_prediction_line, key='-SHOW_TARGET_PREDICTION_LINE-', enable_events=True)],
+        [sg.Checkbox("Show bScope Box", default=cfg.show_bScope_box, key='-SHOW_BSCOPE_BOX-', enable_events=True)],
+        [sg.Checkbox("Show History Points", default=cfg.show_history_points, key='-SHOW_HISTORY_POINTS-', enable_events=True)],
+        [sg.Checkbox("Always On Top", default=cfg.debug_window_always_on_top, key='-DEBUG_WINDOW_ALWAYS_ON_TOP-', enable_events=True)],
+        [sg.Text("Window Position X:"), sg.Slider(range=(0, 3840), default_value=cfg.spawn_window_pos_x, orientation='h', key='-SPAWN_WINDOW_POS_X-', enable_events=True)],
+        [sg.Text("Window Position Y:"), sg.Slider(range=(0, 2160), default_value=cfg.spawn_window_pos_y, orientation='h', key='-SPAWN_WINDOW_POS_Y-', enable_events=True)],
+        [sg.Text("Window Scale Percent:"), sg.Slider(range=(50, 200), default_value=cfg.debug_window_scale_percent, orientation='h', key='-DEBUG_WINDOW_SCALE_PERCENT-', enable_events=True)],
+        [sg.Text("Screenshot Key:"), sg.Input(cfg.debug_window_screenshot_key, key='-DEBUG_WINDOW_SCREENSHOT_KEY-', enable_events=True)],
+    ]
+    return layout
