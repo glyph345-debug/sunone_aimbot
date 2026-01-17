@@ -7,7 +7,7 @@ from logic.visual import visuals
 from logic.frame_parser import frameParser
 from logic.hotkeys_watcher import hotkeys_watcher
 from logic.checks import run_checks
-from gui.config_window import config_window
+from gui import config_window
 import supervision as sv
     
 tracker = sv.ByteTrack() if not cfg.disable_tracker else None
@@ -49,7 +49,7 @@ def perform_detection(model, image, tracker: sv.ByteTrack | None = None):
 def init():
     run_checks()
     
-    # Start ImGui GUI configuration window in a separate thread
+    # Start PySimpleGUI configuration window in a separate thread
     try:
         config_window.show()
     except Exception as e:

@@ -1,41 +1,14 @@
-import imgui
-
+import PySimpleGUI as sg
 
 def draw_aim(cfg):
-    """Draw aim settings section"""
-    
-    # Body Y offset
-    changed, value = imgui.slider_float("Body Y Offset", cfg.body_y_offset, 0.0, 1.0)
-    if changed:
-        cfg.body_y_offset = value
-        cfg.save()
-    
-    # Hideout targets
-    changed, value = imgui.checkbox("Hideout Targets", cfg.hideout_targets)
-    if changed:
-        cfg.hideout_targets = value
-        cfg.save()
-    
-    # Disable headshot
-    changed, value = imgui.checkbox("Disable Headshot", cfg.disable_headshot)
-    if changed:
-        cfg.disable_headshot = value
-        cfg.save()
-    
-    # Disable prediction
-    changed, value = imgui.checkbox("Disable Prediction", cfg.disable_prediction)
-    if changed:
-        cfg.disable_prediction = value
-        cfg.save()
-    
-    # Prediction interval
-    changed, value = imgui.slider_float("Prediction Interval", cfg.prediction_interval, 0.0, 10.0)
-    if changed:
-        cfg.prediction_interval = value
-        cfg.save()
-    
-    # Third person
-    changed, value = imgui.checkbox("Third Person", cfg.third_person)
-    if changed:
-        cfg.third_person = value
-        cfg.save()
+    """Returns PySimpleGUI layout for aim settings"""
+    layout = [
+        [sg.Text("Aim Settings", font=("Arial", 12, "bold"))],
+        [sg.Text("Body Y Offset:"), sg.Slider(range=(0.0, 1.0), resolution=0.01, default_value=cfg.body_y_offset, orientation='h', key='-BODY_Y_OFFSET-', enable_events=True)],
+        [sg.Checkbox("Hideout Targets", default=cfg.hideout_targets, key='-HIDEOUT_TARGETS-', enable_events=True)],
+        [sg.Checkbox("Disable Headshot", default=cfg.disable_headshot, key='-DISABLE_HEADSHOT-', enable_events=True)],
+        [sg.Checkbox("Disable Prediction", default=cfg.disable_prediction, key='-DISABLE_PREDICTION-', enable_events=True)],
+        [sg.Text("Prediction Interval:"), sg.Slider(range=(0.0, 10.0), resolution=0.1, default_value=cfg.prediction_interval, orientation='h', key='-PREDICTION_INTERVAL-', enable_events=True)],
+        [sg.Checkbox("Third Person", default=cfg.third_person, key='-THIRD_PERSON-', enable_events=True)],
+    ]
+    return layout

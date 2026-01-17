@@ -1,53 +1,16 @@
-import imgui
-
+import PySimpleGUI as sg
 
 def draw_ai(cfg):
-    """Draw AI model and detection settings section"""
+    """Returns PySimpleGUI layout for AI settings"""
+    devices = ["cpu", "0", "1", "2", "3", "cuda", "mps"]
     
-    # AI model name
-    imgui.text("AI Model Name:")
-    imgui.same_line()
-    imgui.push_item_width(300)
-    changed, value = imgui.input_text("##model_name", cfg.AI_model_name, 100)
-    imgui.pop_item_width()
-    if changed:
-        cfg.AI_model_name = value
-        cfg.save()
-    
-    # Model image size
-    changed, value = imgui.slider_int("Model Image Size", cfg.ai_model_image_size, 320, 1280)
-    if changed:
-        cfg.ai_model_image_size = value
-        cfg.save()
-    
-    # Confidence threshold
-    changed, value = imgui.slider_float("Confidence Threshold", cfg.AI_conf, 0.0, 1.0)
-    if changed:
-        cfg.AI_conf = value
-        cfg.save()
-    
-    # Device selection
-    imgui.text("AI Device:")
-    imgui.same_line()
-    imgui.push_item_width(200)
-    changed, value = imgui.combo(
-        "##device",
-        ["cpu", "0", "1", "2", "3", "cuda", "mps"],
-        0 if cfg.AI_device == "cpu" else int(cfg.AI_device) if cfg.AI_device.isdigit() else 5 if cfg.AI_device == "cuda" else 0
-    )
-    imgui.pop_item_width()
-    if changed:
-        cfg.AI_device = ["cpu", "0", "1", "2", "3", "cuda", "mps"][value]
-        cfg.save()
-    
-    # AMD enable
-    changed, value = imgui.checkbox("Enable AMD", cfg.AI_enable_AMD)
-    if changed:
-        cfg.AI_enable_AMD = value
-        cfg.save()
-    
-    # Disable tracker
-    changed, value = imgui.checkbox("Disable Tracker", cfg.disable_tracker)
-    if changed:
-        cfg.disable_tracker = value
-        cfg.save()
+    layout = [
+        [sg.Text("AI Settings", font=("Arial", 12, "bold"))],
+        [sg.Text("AI Model Name:"), sg.Input(cfg.AI_model_name, key='-AI_MODEL_NAME-', enable_events=True)],
+        [sg.Text("Model Image Size:"), sg.Slider(range=(320, 1280), default_value=cfg.ai_model_image_size, orientation='h', key='-AI_MODEL_IMAGE_SIZE-', enable_events=True)],
+        [sg.Text("Confidence Threshold:"), sg.Slider(range=(0.0, 1.0), resolution=0.01, default_value=cfg.AI_conf, orientation='h', key='-AI_CONF-', enable_events=True)],
+        [sg.Text("AI Device:"), sg.Combo(devices, default_value=cfg.AI_device, key='-AI_DEVICE-', enable_events=True, readonly=True)],
+        [sg.Checkbox("Enable AMD", default=cfg.AI_enable_AMD, key='-AI_ENABLE_AMD-', enable_events=True)],
+        [sg.Checkbox("Disable Tracker", default=cfg.disable_tracker, key='-DISABLE_TRACKER-', enable_events=True)],
+    ]
+    return layout
