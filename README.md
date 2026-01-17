@@ -33,9 +33,6 @@ Before you get started, make sure you have the following prerequisites installed
 <br></br>
 - To launch the aimbot after all installations, start run_ai.bat or type `py run.py`.
 
-# Use the new C++ version of the AI-Aimbot!
-- [Sunone_aimbot_cpp](https://github.com/SunOner/sunone_aimbot_cpp): The Python version is good, but C++ is even better. It has an overlay, is faster, and much more. Currently, it is updated much more frequently than the Python version. It's better to use the C++ version.
-
 ## Working environment:
 <table>
   <thead><tr><th>Windows</th><td>10 and 11(priority)</td></thead>
@@ -55,9 +52,3 @@ Before you get started, make sure you have the following prerequisites installed
 - Turn off the cv2 debug window, this saves system resources.
 - Do not increase the object search window resolution, this may affect your search speed.
 - If you have started the application and nothing happens, it may be working, close it with the F2 key and change the `show_window` option to `True` in the file [config.ini](https://github.com/SunOner/sunone_aimbot/blob/main/config.ini) to make sure that the application is working.
-
-## Support the project
-[Boosty](https://boosty.to/sunone) [Patreon](https://www.patreon.com/sunone).
-
-## License
-This project is licensed under the MIT License. See **[LICENSE](https://github.com/SunOner/sunone_aimbot/blob/main/LICENSE)** for details
