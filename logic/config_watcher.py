@@ -133,6 +133,92 @@ class Config():
         
         if verbose:
             logger.info("[Config] Config reloaded")
+    
+    def save(self):
+        """Save current config values to file"""
+        try:
+            with cfg_file_lock:
+                self.config["Detection window"]["detection_window_width"] = str(self.detection_window_width)
+                self.config["Detection window"]["detection_window_height"] = str(self.detection_window_height)
+                self.config["Detection window"]["circle_capture"] = str(self.circle_capture)
+                
+                self.config["Capture Methods"]["capture_fps"] = str(self.capture_fps)
+                self.config["Capture Methods"]["Bettercam_capture"] = str(self.Bettercam_capture)
+                self.config["Capture Methods"]["bettercam_monitor_id"] = str(self.bettercam_monitor_id)
+                self.config["Capture Methods"]["bettercam_gpu_id"] = str(self.bettercam_gpu_id)
+                self.config["Capture Methods"]["Obs_capture"] = str(self.Obs_capture)
+                self.config["Capture Methods"]["Obs_camera_id"] = self.Obs_camera_id
+                self.config["Capture Methods"]["mss_capture"] = str(self.mss_capture)
+                
+                self.config["Aim"]["body_y_offset"] = str(self.body_y_offset)
+                self.config["Aim"]["hideout_targets"] = str(self.hideout_targets)
+                self.config["Aim"]["disable_headshot"] = str(self.disable_headshot)
+                self.config["Aim"]["disable_prediction"] = str(self.disable_prediction)
+                self.config["Aim"]["prediction_interval"] = str(self.prediction_interval)
+                self.config["Aim"]["third_person"] = str(self.third_person)
+                
+                self.config["Hotkeys"]["hotkey_targeting"] = self.hotkey_targeting
+                self.config["Hotkeys"]["hotkey_exit"] = self.hotkey_exit
+                self.config["Hotkeys"]["hotkey_pause"] = self.hotkey_pause
+                self.config["Hotkeys"]["hotkey_reload_config"] = self.hotkey_reload_config
+                
+                self.config["Mouse"]["mouse_dpi"] = str(self.mouse_dpi)
+                self.config["Mouse"]["mouse_sensitivity"] = str(self.mouse_sensitivity)
+                self.config["Mouse"]["mouse_fov_width"] = str(self.mouse_fov_width)
+                self.config["Mouse"]["mouse_fov_height"] = str(self.mouse_fov_height)
+                self.config["Mouse"]["mouse_min_speed_multiplier"] = str(self.mouse_min_speed_multiplier)
+                self.config["Mouse"]["mouse_max_speed_multiplier"] = str(self.mouse_max_speed_multiplier)
+                self.config["Mouse"]["mouse_lock_target"] = str(self.mouse_lock_target)
+                self.config["Mouse"]["mouse_auto_aim"] = str(self.mouse_auto_aim)
+                self.config["Mouse"]["mouse_ghub"] = str(self.mouse_ghub)
+                self.config["Mouse"]["mouse_rzr"] = str(self.mouse_rzr)
+                
+                self.config["Shooting"]["auto_shoot"] = str(self.auto_shoot)
+                self.config["Shooting"]["triggerbot"] = str(self.triggerbot)
+                self.config["Shooting"]["force_click"] = str(self.force_click)
+                self.config["Shooting"]["bScope_multiplier"] = str(self.bScope_multiplier)
+                
+                self.config["Arduino"]["arduino_move"] = str(self.arduino_move)
+                self.config["Arduino"]["arduino_shoot"] = str(self.arduino_shoot)
+                self.config["Arduino"]["arduino_port"] = self.arduino_port
+                self.config["Arduino"]["arduino_baudrate"] = str(self.arduino_baudrate)
+                self.config["Arduino"]["arduino_16_bit_mouse"] = str(self.arduino_16_bit_mouse)
+                
+                self.config["AI"]["AI_model_name"] = self.AI_model_name
+                self.config["AI"]["ai_model_image_size"] = str(self.ai_model_image_size)
+                self.config["AI"]["AI_conf"] = str(self.AI_conf)
+                self.config["AI"]["AI_device"] = self.AI_device
+                self.config["AI"]["AI_enable_AMD"] = str(self.AI_enable_AMD)
+                self.config["AI"]["disable_tracker"] = str(self.disable_tracker)
+                
+                self.config["overlay"]["show_overlay"] = str(self.show_overlay)
+                self.config["overlay"]["overlay_show_borders"] = str(self.overlay_show_borders)
+                self.config["overlay"]["overlay_show_boxes"] = str(self.overlay_show_boxes)
+                self.config["overlay"]["overlay_show_target_line"] = str(self.overlay_show_target_line)
+                self.config["overlay"]["overlay_show_target_prediction_line"] = str(self.overlay_show_target_prediction_line)
+                self.config["overlay"]["overlay_show_labels"] = str(self.overlay_show_labels)
+                self.config["overlay"]["overlay_show_conf"] = str(self.overlay_show_conf)
+                
+                self.config["Debug window"]["show_window"] = str(self.show_window)
+                self.config["Debug window"]["show_detection_speed"] = str(self.show_detection_speed)
+                self.config["Debug window"]["show_window_fps"] = str(self.show_window_fps)
+                self.config["Debug window"]["show_boxes"] = str(self.show_boxes)
+                self.config["Debug window"]["show_labels"] = str(self.show_labels)
+                self.config["Debug window"]["show_conf"] = str(self.show_conf)
+                self.config["Debug window"]["show_target_line"] = str(self.show_target_line)
+                self.config["Debug window"]["show_target_prediction_line"] = str(self.show_target_prediction_line)
+                self.config["Debug window"]["show_bScope_box"] = str(self.show_bScope_box)
+                self.config["Debug window"]["show_history_points"] = str(self.show_history_points)
+                self.config["Debug window"]["debug_window_always_on_top"] = str(self.debug_window_always_on_top)
+                self.config["Debug window"]["spawn_window_pos_x"] = str(self.spawn_window_pos_x)
+                self.config["Debug window"]["spawn_window_pos_y"] = str(self.spawn_window_pos_y)
+                self.config["Debug window"]["debug_window_scale_percent"] = str(self.debug_window_scale_percent)
+                self.config["Debug window"]["debug_window_screenshot_key"] = self.debug_window_screenshot_key
+                
+                with open("config.ini", "w", encoding="utf-8") as f:
+                    self.config.write(f)
+        except Exception as e:
+            logger.error(f"[Config] Error saving config: {e}")
             
     def get_random_window_name(self):
         try:

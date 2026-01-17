@@ -15,3 +15,6 @@ keyboard
 mss
 supervision
 PySimpleGUI
+imgui[glfw]
+PyOpenGL
+glfw
